@@ -50,6 +50,7 @@
 #include "third_party/blink/public/common/chrome_debug_urls.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event_attribution.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
@@ -304,7 +305,8 @@ LocalFrame* LocalFrame::FromFrameToken(const LocalFrameToken& frame_token) {
 }
 
 void LocalFrame::Init(Frame* opener,
-                      std::unique_ptr<PolicyContainer> policy_container) {
+                      std::unique_ptr<PolicyContainer> policy_container,
+                      const StorageKey& storage_key) {
   if (!policy_container)
     policy_container = PolicyContainer::CreateEmpty();
 
@@ -316,7 +318,7 @@ void LocalFrame::Init(Frame* opener,
   mojo_handler_ = MakeGarbageCollected<LocalFrameMojoHandler>(*this);
 
   SetOpenerDoNotNotify(opener);
-  loader_.Init(std::move(policy_container));
+  loader_.Init(std::move(policy_container), storage_key);
 }
 
 void LocalFrame::SetView(LocalFrameView* view) {
@@ -620,17 +622,22 @@ void LocalFrame::CheckCompleted() {
 
 BackgroundColorPaintImageGenerator*
 LocalFrame::GetBackgroundColorPaintImageGenerator() {
-  // There is no compositor thread in certain testing environment, and we should
-  // not composite background color animation in those cases.
-  if (!Thread::CompositorThread())
-    return nullptr;
   LocalFrame& local_root = LocalFrameRoot();
   // One background color paint worklet per root frame.
-  if (!local_root.background_color_paint_image_generator_) {
+  // There is no compositor thread in certain testing environment, and we
+  // should not composite background color animation in those cases.
+  if (Thread::CompositorThread() &&
+      !local_root.background_color_paint_image_generator_) {
     local_root.background_color_paint_image_generator_ =
         BackgroundColorPaintImageGenerator::Create(local_root);
   }
   return local_root.background_color_paint_image_generator_.Get();
+}
+
+void LocalFrame::SetBackgroundColorPaintImageGeneratorForTesting(
+    BackgroundColorPaintImageGenerator* generator_for_testing) {
+  LocalFrame& local_root = LocalFrameRoot();
+  local_root.background_color_paint_image_generator_ = generator_for_testing;
 }
 
 BoxShadowPaintImageGenerator* LocalFrame::GetBoxShadowPaintImageGenerator() {
@@ -2124,22 +2131,20 @@ void LocalFrame::SetViewportIntersectionFromParent(
   }
 }
 
-gfx::Size LocalFrame::GetMainFrameViewportSize() const {
+gfx::Size LocalFrame::GetOutermostMainFrameSize() const {
   LocalFrame& local_root = LocalFrameRoot();
-  return local_root.IsMainFrame()
-             ? local_root.View()
-                   ->GetScrollableArea()
-                   ->VisibleContentRect()
-                   .size()
-             : local_root.intersection_state_.main_frame_viewport_size;
+  return local_root.IsOutermostMainFrame()
+             ? local_root.View()->LayoutViewport()->VisibleContentRect().size()
+             : local_root.intersection_state_.outermost_main_frame_size;
 }
 
-gfx::Point LocalFrame::GetMainFrameScrollPosition() const {
+gfx::Point LocalFrame::GetOutermostMainFrameScrollPosition() const {
   LocalFrame& local_root = LocalFrameRoot();
-  return local_root.IsMainFrame()
+  return local_root.IsOutermostMainFrame()
              ? gfx::ToFlooredPoint(
                    local_root.View()->LayoutViewport()->ScrollPosition())
-             : local_root.intersection_state_.main_frame_scroll_position;
+             : local_root.intersection_state_
+                   .outermost_main_frame_scroll_position;
 }
 
 void LocalFrame::SetOpener(Frame* opener_frame) {
@@ -2229,7 +2234,7 @@ bool LocalFrame::IsAdRoot() const {
   return IsAdFrame() && !ad_evidence_->parent_is_ad();
 }
 
-void LocalFrame::SetAdEvidence(const blink::FrameAdEvidence& ad_evidence) {
+void LocalFrame::SetAdEvidence(const FrameAdEvidence& ad_evidence) {
   DCHECK(!IsMainFrame() || IsInFencedFrameTree());
   DCHECK(ad_evidence.is_complete());
 
@@ -2294,11 +2299,11 @@ void LocalFrame::UpdateAdHighlight() {
   if (IsAdRoot() && GetPage()->GetSettings().GetHighlightAds())
     SetSubframeColorOverlay(SkColorSetARGB(128, 255, 0, 0));
   else
-    SetSubframeColorOverlay(Color::kTransparent);
+    SetSubframeColorOverlay(SK_ColorTRANSPARENT);
 }
 
 void LocalFrame::PauseSubresourceLoading(
-    mojo::PendingReceiver<blink::mojom::blink::PauseSubresourceLoadingHandle>
+    mojo::PendingReceiver<mojom::blink::PauseSubresourceLoadingHandle>
         receiver) {
   auto handle = GetFrameScheduler()->GetPauseSubresourceLoadingHandle();
   if (!handle)
@@ -2433,16 +2438,22 @@ class FrameColorOverlay final : public FrameOverlay::Delegate {
                              gfx::Rect(view->Size()));
     gfx::RectF rect(0, 0, view->Width(), view->Height());
     graphics_context.FillRect(
-        rect, color_,
+        rect, Color::FromSkColor(color_),
         PaintAutoDarkMode(view->GetLayoutView()->StyleRef(),
                           DarkModeFilter::ElementRole::kBackground));
   }
 
+  // TODO(https://crbug.com/1351544): This should be an SkColor4f or a Color.
   SkColor color_;
   Persistent<LocalFrame> frame_;
 };
 
 }  // namespace
+
+void LocalFrame::SetReducedAcceptLanguage(
+    const AtomicString& reduced_accept_language) {
+  reduced_accept_language_ = reduced_accept_language;
+}
 
 void LocalFrame::SetMainFrameColorOverlay(SkColor color) {
   DCHECK(IsMainFrame() && !IsInFencedFrameTree());
@@ -2458,7 +2469,7 @@ void LocalFrame::SetFrameColorOverlay(SkColor color) {
   if (frame_color_overlay_)
     frame_color_overlay_.Release()->Destroy();
 
-  if (color == Color::kTransparent)
+  if (color == SK_ColorTRANSPARENT)
     return;
 
   frame_color_overlay_ = MakeGarbageCollected<FrameOverlay>(
@@ -2540,6 +2551,46 @@ void LocalFrame::LoadJavaScriptURL(const KURL& url) {
   DomWindow()->GetScriptController().ExecuteJavaScriptURL(
       url, network::mojom::CSPDisposition::DO_NOT_CHECK,
       &DOMWrapperWorld::MainWorld());
+}
+
+void LocalFrame::RequestExecuteScript(
+    int32_t world_id,
+    base::span<const WebScriptSource> sources,
+    mojom::blink::UserActivationOption user_gesture,
+    mojom::blink::EvaluationTiming evaluation_timing,
+    mojom::blink::LoadEventBlockingOption blocking_option,
+    WebScriptExecutionCallback callback,
+    BackForwardCacheAware back_forward_cache_aware,
+    mojom::blink::WantResultOption want_result_option,
+    mojom::blink::PromiseResultOption promise_behavior) {
+  scoped_refptr<DOMWrapperWorld> world;
+  ExecuteScriptPolicy execute_script_policy;
+  if (world_id == DOMWrapperWorld::kMainWorldId) {
+    world = &DOMWrapperWorld::MainWorld();
+    execute_script_policy =
+        ExecuteScriptPolicy::kDoNotExecuteScriptWhenScriptsDisabled;
+  } else {
+    world = DOMWrapperWorld::EnsureIsolatedWorld(ToIsolate(this), world_id);
+
+    // This is to preserve the existing behavior.
+    execute_script_policy =
+        ExecuteScriptPolicy::kExecuteScriptWhenScriptsDisabled;
+  }
+
+  if (back_forward_cache_aware == BackForwardCacheAware::kPossiblyDisallow) {
+    GetFrameScheduler()->RegisterStickyFeature(
+        SchedulingPolicy::Feature::kInjectedJavascript,
+        {SchedulingPolicy::DisableBackForwardCache()});
+  }
+
+  Vector<WebScriptSource> script_sources;
+  script_sources.Append(sources.data(),
+                        base::checked_cast<wtf_size_t>(sources.size()));
+
+  PausableScriptExecutor::CreateAndRun(
+      ToScriptState(DomWindow(), *world), std::move(script_sources),
+      execute_script_policy, user_gesture, evaluation_timing, blocking_option,
+      want_result_option, promise_behavior, std::move(callback));
 }
 
 void LocalFrame::SetEvictCachedSessionStorageOnFreezeOrUnload() {
@@ -2936,7 +2987,7 @@ void LocalFrame::SaveImageAt(const gfx::Point& window_point) {
 
 void LocalFrame::MediaPlayerActionAtViewportPoint(
     const gfx::Point& viewport_position,
-    const blink::mojom::blink::MediaPlayerActionType type,
+    const mojom::blink::MediaPlayerActionType type,
     bool enable) {
   HitTestResult result = HitTestResultForVisualViewportPos(viewport_position);
   Node* node = result.InnerNode();
@@ -2945,22 +2996,22 @@ void LocalFrame::MediaPlayerActionAtViewportPoint(
 
   auto* media_element = To<HTMLMediaElement>(node);
   switch (type) {
-    case blink::mojom::blink::MediaPlayerActionType::kPlay:
+    case mojom::blink::MediaPlayerActionType::kPlay:
       if (enable)
         media_element->Play();
       else
         media_element->pause();
       break;
-    case blink::mojom::blink::MediaPlayerActionType::kMute:
+    case mojom::blink::MediaPlayerActionType::kMute:
       media_element->setMuted(enable);
       break;
-    case blink::mojom::blink::MediaPlayerActionType::kLoop:
+    case mojom::blink::MediaPlayerActionType::kLoop:
       media_element->SetLoop(enable);
       break;
-    case blink::mojom::blink::MediaPlayerActionType::kControls:
+    case mojom::blink::MediaPlayerActionType::kControls:
       media_element->SetUserWantsControlsVisible(enable);
       break;
-    case blink::mojom::blink::MediaPlayerActionType::kPictureInPicture:
+    case mojom::blink::MediaPlayerActionType::kPictureInPicture:
       DCHECK(IsA<HTMLVideoElement>(media_element));
       if (enable) {
         PictureInPictureController::From(node->GetDocument())

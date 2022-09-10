@@ -24,6 +24,8 @@ class HttpResponseInfo;
 class IOBuffer;
 class PartialData;
 
+enum class WriterAboutToBeRemovedFromEntryCaller : uint8_t;
+
 // If multiple HttpCache::Transactions are accessing the same cache entry
 // simultaneously, their access to the data read from network is synchronized
 // by HttpCache::Writers. This enables each of those transactions to drive
@@ -114,9 +116,6 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   // Returns true if this object is empty.
   bool IsEmpty() const { return all_writers_.empty(); }
-
-  // Invoked during HttpCache's destruction.
-  void Clear() { all_writers_.clear(); }
 
   // Returns true if |transaction| is part of writers.
   bool HasTransaction(const Transaction* transaction) const {
@@ -233,9 +232,13 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   void TruncateEntry();
 
   // Remove the transaction.
-  void EraseTransaction(Transaction* transaction, int result);
-  TransactionMap::iterator EraseTransaction(TransactionMap::iterator it,
-                                            int result);
+  void EraseTransaction(Transaction* transaction,
+                        int result,
+                        WriterAboutToBeRemovedFromEntryCaller caller);
+  TransactionMap::iterator EraseTransaction(
+      TransactionMap::iterator it,
+      int result,
+      WriterAboutToBeRemovedFromEntryCaller caller);
   void SetCacheCallback(bool success, const TransactionSet& make_readers);
 
   // IO Completion callback function.
@@ -249,7 +252,7 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   raw_ptr<HttpCache> const cache_ = nullptr;
 
   // Owner of |this|.
-  raw_ptr<ActiveEntry> const entry_ = nullptr;
+  raw_ptr<ActiveEntry, DanglingUntriaged> const entry_ = nullptr;
 
   std::unique_ptr<HttpTransaction> network_transaction_;
 

@@ -467,6 +467,9 @@ NET_EXPORT extern const base::FeatureParam<int>
 NET_EXPORT extern const base::FeatureParam<int>
     kOptimizeNetworkBuffersFilterSourceStreamBufferSize;
 
+NET_EXPORT extern const base::FeatureParam<bool>
+    kOptimizeNetworkBuffersInputStreamCheckAvailable;
+
 // Enable the Storage Access API. https://crbug.com/989663.
 NET_EXPORT extern const base::Feature kStorageAccessAPI;
 
@@ -476,6 +479,22 @@ NET_EXPORT extern const base::Feature kStorageAccessAPI;
 NET_EXPORT extern const int kStorageAccessAPIDefaultImplicitGrantLimit;
 NET_EXPORT extern const base::FeatureParam<int>
     kStorageAccessAPIImplicitGrantLimit;
+// Whether the Storage Access API can grant access to storage (even if it is
+// unpartitioned). When this feature is disabled, access to storage is only
+// granted if the storage is partitioned.
+NET_EXPORT extern const base::FeatureParam<bool>
+    kStorageAccessAPIGrantsUnpartitionedStorage;
+
+NET_EXPORT extern const base::Feature kThirdPartyStoragePartitioning;
+
+// Whether ALPS parsing is on for any type of frame.
+NET_EXPORT extern const base::Feature kAlpsParsing;
+
+// Whether ALPS parsing is on for client hint parsing specifically.
+NET_EXPORT extern const base::Feature kAlpsClientHintParsing;
+
+// Whether to kill the session on Error::kAcceptChMalformed.
+NET_EXPORT extern const base::Feature kShouldKillSessionOnAcceptChMalformed;
 
 }  // namespace net::features
 

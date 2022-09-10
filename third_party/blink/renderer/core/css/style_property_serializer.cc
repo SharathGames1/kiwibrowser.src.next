@@ -593,6 +593,8 @@ String StylePropertySerializer::SerializeShorthand(
       return Get2Values(scrollMarginBlockShorthand());
     case CSSPropertyID::kScrollMarginInline:
       return Get2Values(scrollMarginInlineShorthand());
+    case CSSPropertyID::kScrollTimeline:
+      return ScrollTimelineValue();
     case CSSPropertyID::kPageBreakAfter:
       return PageBreakPropertyValue(pageBreakAfterShorthand());
     case CSSPropertyID::kPageBreakBefore:
@@ -739,6 +741,39 @@ String StylePropertySerializer::ContainerValue() const {
         To<CSSIdentifierValue>(*type).GetValueID() == CSSValueID::kNormal)) {
     list->Append(*type);
   }
+
+  return list->CssText();
+}
+
+String StylePropertySerializer::ScrollTimelineValue() const {
+  CHECK_EQ(scrollTimelineShorthand().length(), 2u);
+  CHECK_EQ(scrollTimelineShorthand().properties()[0],
+           &GetCSSPropertyScrollTimelineAxis());
+  CHECK_EQ(scrollTimelineShorthand().properties()[1],
+           &GetCSSPropertyScrollTimelineName());
+
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+
+  const CSSValue* axis =
+      property_set_.GetPropertyCSSValue(GetCSSPropertyScrollTimelineAxis());
+  const CSSValue* name =
+      property_set_.GetPropertyCSSValue(GetCSSPropertyScrollTimelineName());
+
+  DCHECK(axis);
+  DCHECK(name);
+
+  // Append any value that's not the initial value.
+  if (To<CSSIdentifierValue>(*axis).GetValueID() != CSSValueID::kBlock) {
+    list->Append(*axis);
+  }
+  if (!(IsA<CSSIdentifierValue>(name) &&
+        To<CSSIdentifierValue>(*name).GetValueID() == CSSValueID::kNone)) {
+    list->Append(*name);
+  }
+
+  // If both values were the initial value, we append axis.
+  if (!list->length())
+    list->Append(*axis);
 
   return list->CssText();
 }
@@ -1300,6 +1335,15 @@ String StylePropertySerializer::GetShorthandValueForGrid(
       property_set_.GetPropertyCSSValue(*shorthand.properties()[1]);
   const CSSValueList* auto_flow_value_list =
       DynamicTo<CSSValueList>(auto_flow_values);
+
+  // We cannot represent a grid shorthand if we have both template row and
+  // template column values along with auto-flow.
+  if (*template_row_values !=
+          *(To<Longhand>(GetCSSPropertyGridTemplateRows()).InitialValue()) &&
+      *template_column_values !=
+          *(To<Longhand>(GetCSSPropertyGridTemplateColumns()).InitialValue())) {
+    return String();
+  }
 
   StringBuilder auto_flow_text;
   auto_flow_text.Append("auto-flow ");

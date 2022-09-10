@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/paint/pre_paint_tree_walk.h"
 
 #include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -59,8 +60,10 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
   // GeometryMapper depends on paint properties.
   bool needs_tree_builder_context_update =
       NeedsTreeBuilderContextUpdate(root_frame_view, context);
-  if (needs_tree_builder_context_update)
+  if (needs_tree_builder_context_update) {
+    root_frame_view.ClearAllPendingTransformUpdates();
     GeometryMapper::ClearCache();
+  }
 
   VisualViewport& visual_viewport =
       root_frame_view.GetPage()->GetVisualViewport();
@@ -85,6 +88,7 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
     if (auto* client = root_frame_view.GetChromeClient())
       client->InvalidateContainer();
   }
+  root_frame_view.UpdateAllPendingTransforms();
 }
 
 void PrePaintTreeWalk::Walk(LocalFrameView& frame_view,
@@ -501,7 +505,7 @@ void PrePaintTreeWalk::WalkInternal(const LayoutObject& object,
 
   if (paint_invalidator_.InvalidatePaint(
           object, pre_paint_info,
-          base::OptionalOrNullptr(context.tree_builder_context),
+          base::OptionalToPtr(context.tree_builder_context),
           paint_invalidator_context))
     needs_invalidate_chrome_client_ = true;
 
@@ -960,8 +964,8 @@ void PrePaintTreeWalk::WalkChildren(
   const LayoutBox* box = DynamicTo<LayoutBox>(&object);
   if (box) {
     if (traversable_fragment) {
-      if (!box->IsLayoutFlowThread() && (!box->CanTraversePhysicalFragments() ||
-                                         !box->PhysicalFragmentCount())) {
+      if (!box->IsLayoutFlowThread() &&
+          (!box->IsLayoutNGObject() || !box->PhysicalFragmentCount())) {
         // Leave LayoutNGBoxFragment-accompanied child LayoutObject traversal,
         // since this object doesn't support that (or has no fragments (happens
         // for table columns)). We need to switch back to legacy LayoutObject
@@ -1011,7 +1015,7 @@ void PrePaintTreeWalk::WalkChildren(
     // box-tree-wise. This is only an issue for OOF descendants, though, so only
     // examine OOF containing blocks.
     if (box && box->CanContainAbsolutePositionObjects() &&
-        box->PhysicalFragmentCount()) {
+        box->IsLayoutNGObject() && box->PhysicalFragmentCount()) {
       DCHECK_EQ(box->PhysicalFragmentCount(), 1u);
       fragment = box->GetPhysicalFragment(0);
     }

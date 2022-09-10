@@ -59,11 +59,14 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance {
   // newly SiteInstance and BrowsingInstance is for a <webview> guest. This is
   // used in site-isolated guests to support cross-BrowsingInstance navigations
   // within a guest; when true, the guest's StoragePartition information must
-  // also be provided in `url_info`.
+  // also be provided in `url_info`. `is_fenced` specifies if the
+  // BrowsingInstance is for a fenced frame, and is used to isolate them from
+  // non-fenced BrowsingInstances.
   static scoped_refptr<SiteInstanceImpl> CreateForUrlInfo(
       BrowserContext* browser_context,
       const UrlInfo& url_info,
-      bool is_guest);
+      bool is_guest,
+      bool is_fenced);
 
   // Creates a SiteInstance that will be use for a service worker.
   // `url_info` - The UrlInfo for the service worker. It contains the URL and
@@ -357,6 +360,11 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance {
   // RenderFrameHostManager.
   static GURL GetEffectiveURL(BrowserContext* browser_context, const GURL& url);
 
+  // True if |url| resolves to an effective URL that is different from |url|.
+  // See GetEffectiveURL().  This will be true for hosted apps as well as NTP
+  // URLs.
+  static bool HasEffectiveURL(BrowserContext* browser_context, const GURL& url);
+
   // Return an ID of the next BrowsingInstance to be created.  This ID is
   // guaranteed to be higher than any ID of an existing BrowsingInstance.
   // This is useful when process model decisions need to be scoped only to
@@ -491,11 +499,6 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance {
                          const UrlInfo& src_url_info,
                          const UrlInfo& dest_url_info,
                          bool should_compare_effective_urls);
-
-  // True if |url| resolves to an effective URL that is different from |url|.
-  // See GetEffectiveURL().  This will be true for hosted apps as well as NTP
-  // URLs.
-  static bool HasEffectiveURL(BrowserContext* browser_context, const GURL& url);
 
   // Returns true if |url| and its |site_url| can be placed inside a default
   // SiteInstance.

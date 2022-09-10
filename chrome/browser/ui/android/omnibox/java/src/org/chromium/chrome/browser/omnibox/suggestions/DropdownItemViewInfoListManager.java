@@ -11,8 +11,7 @@ import android.view.View;
 
 import androidx.annotation.NonNull;
 
-import org.chromium.chrome.browser.flags.CachedFeatureFlags;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.omnibox.OmniboxFeatures;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.components.omnibox.AutocompleteResult;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -130,8 +129,7 @@ class DropdownItemViewInfoListManager {
                 ? SuggestionCommonProperties.FormFactor.TABLET
                 : SuggestionCommonProperties.FormFactor.PHONE;
         DropdownItemViewInfo prevSuggestionWithBackground = null;
-        // Note: we consider the Omnibox as part of the background rounding group.
-        boolean inDropdownItemBackgroundRoundingGroup = true;
+        boolean inDropdownItemBackgroundRoundingGroup = false;
         for (int i = 0; i < mSourceViewInfoList.size(); i++) {
             final DropdownItemViewInfo item = mSourceViewInfoList.get(i);
             final PropertyModel model = item.model;
@@ -179,7 +177,7 @@ class DropdownItemViewInfoListManager {
      * @param type The type of the suggestion.
      */
     private boolean suggestionShouldHaveBackground(@OmniboxSuggestionUiType int type) {
-        return CachedFeatureFlags.isEnabled(ChromeFeatureList.OMNIBOX_MODERNIZE_VISUAL_UPDATE)
+        return OmniboxFeatures.shouldShowModernizeVisualUpdate(mContext)
                 && (type == OmniboxSuggestionUiType.DEFAULT
                         || type == OmniboxSuggestionUiType.EDIT_URL_SUGGESTION
                         || type == OmniboxSuggestionUiType.ANSWER_SUGGESTION

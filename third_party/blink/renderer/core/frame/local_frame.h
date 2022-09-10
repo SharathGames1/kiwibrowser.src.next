@@ -58,8 +58,10 @@
 #include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/reporting/reporting.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/script/script_evaluation_params.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_script_execution_callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/weak_identifier_map.h"
@@ -98,11 +100,15 @@ class SizeF;
 namespace blink {
 
 class AdTracker;
-class AttributionSrcLoader;
 class AssociatedInterfaceProvider;
+class AttributionSrcLoader;
+class BackgroundColorPaintImageGenerator;
+class BoxShadowPaintImageGenerator;
 class BrowserInterfaceBrokerProxy;
+class ClipPathPaintImageGenerator;
 class Color;
 class ContentCaptureManager;
+class CoreProbeSink;
 class Document;
 class Editor;
 class Element;
@@ -112,29 +118,26 @@ class FrameConsole;
 class FrameOverlay;
 class FrameSelection;
 class FrameWidget;
+class IdlenessDetector;
 class InputMethodController;
 class InspectorIssueReporter;
-class InspectorTraceEvents;
-class CoreProbeSink;
-class IdlenessDetector;
 class InspectorTaskRunner;
+class InspectorTraceEvents;
 class InterfaceRegistry;
 class LayoutView;
 class LocalDOMWindow;
-class LocalWindowProxy;
 class LocalFrameClient;
 class LocalFrameMojoHandler;
-class BackgroundColorPaintImageGenerator;
-class BoxShadowPaintImageGenerator;
-class ClipPathPaintImageGenerator;
+class LocalWindowProxy;
 class Node;
 class NodeTraversal;
 class PerformanceMonitor;
-class PolicyContainer;
 class PluginData;
-class SystemClipboard;
+class PolicyContainer;
 class SmoothScrollSequencer;
 class SpellChecker;
+class StorageKey;
+class SystemClipboard;
 class TextFragmentHandler;
 class TextSuggestionController;
 class VirtualKeyboardOverlayChangedObserver;
@@ -144,6 +147,9 @@ class WebPluginContainerImpl;
 class WebPrescientNetworking;
 class WebURLLoaderFactory;
 struct BlinkTransferableMessage;
+struct WebScriptSource;
+
+enum class BackForwardCacheAware;
 
 #if !BUILDFLAG(IS_ANDROID)
 class WindowControlsOverlayChangedDelegate;
@@ -184,16 +190,24 @@ class CORE_EXPORT LocalFrame final
       InterfaceRegistry*,
       const base::TickClock* clock = base::DefaultTickClock::GetInstance());
 
-  // Initialize the LocalFrame, creating and initializing its LocalDOMWindow.
-  // |policy_container| is used to set the PolicyContainer of the new
-  // LocalDOMWindow. Usually, it is inherited from the parent or the opener: the
-  // inheritance operation is taken care of by the browser (if this LocalFrame
-  // was just created in response to the creation of a RenderFrameHost) or by
-  // blink if this is a synchronously created LocalFrame child. If you pass a
-  // null |policy_container|, it will be initialized to an empty, default one,
-  // which has no PolicyContainerHost counterpart. This is usually safe to do if
-  // this LocalFrame has no corresponding RenderFrameHost.
-  void Init(Frame* opener, std::unique_ptr<PolicyContainer> policy_container);
+  // Initialize the LocalFrame, creating and initializing its LocalDOMWindow. It
+  // starts from the initial empty document.
+  // - |policy_container| is used to set the PolicyContainer of the new
+  //   LocalDOMWindow. If you pass a null |policy_container|, it will be
+  //   initialized to an empty, default one, which has no PolicyContainerHost
+  //   counterpart. This is usually safe to do if this LocalFrame has no
+  //   corresponding RenderFrameHost.
+  // - |storage_key| is the key used to partition access to storage API like DOM
+  //   storage, IndexedDB, BroadcastChannel, etc...
+  //
+  // Note: Usually, the initial empty document inherits its |policy_container|
+  // and |storage_key| from the parent or the opener. The inheritance operation
+  // is taken care of by the browser (if this LocalFrame was just created in
+  // response to the creation of a RenderFrameHost) or by blink if this is a
+  // synchronously created LocalFrame child.
+  void Init(Frame* opener,
+            std::unique_ptr<PolicyContainer> policy_container,
+            const StorageKey& storage_key);
   void SetView(LocalFrameView*);
   void CreateView(const gfx::Size&, const Color&);
 
@@ -483,8 +497,8 @@ class CORE_EXPORT LocalFrame final
   void SetViewportIntersectionFromParent(
       const mojom::blink::ViewportIntersectionState& intersection_state);
 
-  gfx::Size GetMainFrameViewportSize() const override;
-  gfx::Point GetMainFrameScrollPosition() const override;
+  gfx::Size GetOutermostMainFrameSize() const override;
+  gfx::Point GetOutermostMainFrameScrollPosition() const override;
 
   void SetOpener(Frame* opener) override;
 
@@ -587,6 +601,12 @@ class CORE_EXPORT LocalFrame final
   // by an associated interface with the legacy Chrome IPC channel.
   mojom::blink::BackForwardCacheControllerHost&
   GetBackForwardCacheControllerHostRemote();
+
+  const AtomicString& GetReducedAcceptLanguage() const {
+    return reduced_accept_language_;
+  }
+
+  void SetReducedAcceptLanguage(const AtomicString& reduced_accept_language);
 
   // Overlays a color on top of this LocalFrameView if it is associated with
   // the main frame. Should not have multiple consumers.
@@ -724,6 +744,15 @@ class CORE_EXPORT LocalFrame final
   bool SwapIn();
 
   void LoadJavaScriptURL(const KURL& url);
+  void RequestExecuteScript(int32_t world_id,
+                            base::span<const WebScriptSource> sources,
+                            mojom::blink::UserActivationOption,
+                            mojom::blink::EvaluationTiming,
+                            mojom::blink::LoadEventBlockingOption,
+                            WebScriptExecutionCallback,
+                            BackForwardCacheAware back_forward_cache_aware,
+                            mojom::blink::WantResultOption,
+                            mojom::blink::PromiseResultOption);
 
   void SetEvictCachedSessionStorageOnFreezeOrUnload();
 
@@ -760,6 +789,9 @@ class CORE_EXPORT LocalFrame final
   void SetAncestorOrSelfHasCSPEE(bool has_policy) {
     ancestor_or_self_has_cspee_ = has_policy;
   }
+
+  void SetBackgroundColorPaintImageGeneratorForTesting(
+      BackgroundColorPaintImageGenerator* generator);
 
  private:
   friend class FrameNavigationDisabler;
@@ -1001,6 +1033,9 @@ class CORE_EXPORT LocalFrame final
   // frame). Calculated browser-side and used to help determine if this frame
   // is allowed to load a new child opaque-ads fenced frame.
   bool ancestor_or_self_has_cspee_ = false;
+
+  // Reduced accept language for top-level frame.
+  AtomicString reduced_accept_language_;
 };
 
 inline FrameLoader& LocalFrame::Loader() const {

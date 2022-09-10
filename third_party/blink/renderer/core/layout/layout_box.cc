@@ -722,6 +722,11 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
     }
   }
 
+  if (old_style && old_style->IsScrollContainer() != IsScrollContainer()) {
+    if (auto* layer = EnclosingLayer())
+      layer->ScrollContainerStatusChanged();
+  }
+
   UpdateShapeOutsideInfoAfterStyleChange(*Style(), old_style);
   UpdateGridPositionAfterStyleChange(old_style);
 
@@ -995,10 +1000,6 @@ void LayoutBox::UpdateFromStyle() {
                                ShouldApplyPaintContainment()) &&
                               RespectsCSSOverflow();
   if (should_clip_overflow != HasNonVisibleOverflow()) {
-    if (GetScrollableArea()) {
-      GetScrollableArea()->InvalidateAllStickyConstraints();
-      GetScrollableArea()->InvalidateAllAnchorPositionedLayers();
-    }
     // The overflow clip paint property depends on whether overflow clip is
     // present so we need to update paint properties if this changes.
     SetNeedsPaintPropertyUpdate();
@@ -3182,12 +3183,8 @@ PhysicalOffset LayoutBox::OffsetFromContainerInternal(
     offset += To<LayoutInline>(o)->OffsetForInFlowPositionedInline(*this);
   }
 
-  if (AnchorScrollObject()) {
-    LayoutBox::AnchorScrollData data =
-        To<LayoutBox>(this)->ComputeAnchorScrollData();
-    offset -=
-        PhysicalOffset::FromVector2dFFloor(data.accumulated_scroll_offset);
-  }
+  if (AnchorScrollObject())
+    offset += ComputeAnchorScrollOffset();
 
   return offset;
 }
@@ -3801,6 +3798,8 @@ bool LayoutBox::MapToVisualRectInAncestorSpaceInternal(
     // LayoutObject::setStyle, the relative position flag on the LayoutObject
     // has been cleared, so use the one on the style().
     container_offset += OffsetForInFlowPosition();
+  } else if (UNLIKELY(AnchorScrollObject())) {
+    container_offset += ComputeAnchorScrollOffset();
   }
 
   if (skip_info.FilterSkipped()) {
@@ -8081,8 +8080,17 @@ BackgroundPaintLocation LayoutBox::ComputeBackgroundPaintLocationIfComposited()
   return paint_location;
 }
 
-bool LayoutBox::IsFixedToView() const {
-  return IsFixedPositioned() && Container() == View();
+bool LayoutBox::IsFixedToView(
+    const LayoutObject* container_for_fixed_position) const {
+  if (!IsFixedPositioned())
+    return false;
+
+  const auto* container = container_for_fixed_position;
+  if (!container)
+    container = Container();
+  else
+    DCHECK_EQ(container, Container());
+  return container->IsLayoutView();
 }
 
 PhysicalRect LayoutBox::ComputeStickyConstrainingRect() const {
@@ -8154,6 +8162,11 @@ LayoutBox::AnchorScrollData LayoutBox::ComputeAnchorScrollData() const {
 
   return {inner_most_scroll_container_layer, outer_most_scroll_container_layer,
           accumulated_scroll_offset, accumulated_scroll_origin};
+}
+
+PhysicalOffset LayoutBox::ComputeAnchorScrollOffset() const {
+  return -PhysicalOffset::FromVector2dFFloor(
+      ComputeAnchorScrollData().accumulated_scroll_offset);
 }
 
 }  // namespace blink

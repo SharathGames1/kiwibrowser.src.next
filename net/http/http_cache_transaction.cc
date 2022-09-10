@@ -370,6 +370,8 @@ int HttpCache::Transaction::Read(IOBuffer* buf,
 }
 
 int HttpCache::Transaction::TransitionToReadingState() {
+  transaction_state_at_transition_to_reading_state_ =
+      TransactionState::kUnknown;
   if (!entry_) {
     if (network_trans_) {
       // This can happen when the request should be handled exclusively by
@@ -379,6 +381,9 @@ int HttpCache::Transaction::TransitionToReadingState() {
       // is reading the auth response from the network.
       // TODO(http://crbug.com/740947) to get rid of this state in future.
       next_state_ = STATE_NETWORK_READ;
+
+      transaction_state_at_transition_to_reading_state_ =
+          TransactionState::kNetwork;
       return OK;
     }
 
@@ -386,6 +391,8 @@ int HttpCache::Transaction::TransitionToReadingState() {
     // from.
     next_state_ = STATE_NONE;
 
+    transaction_state_at_transition_to_reading_state_ =
+        TransactionState::kUnknown;
     // An error state should be set for the next read, else this transaction
     // should have been terminated once it reached this state. To assert we
     // could dcheck that shared_writing_error_ is set to a valid error value but
@@ -399,12 +406,16 @@ int HttpCache::Transaction::TransitionToReadingState() {
   if (!InWriters()) {
     // Since transaction is not a writer and we are in Read(), it must be a
     // reader.
-    DCHECK(entry_->TransactionInReaders(this));
+    CHECK(entry_->TransactionInReaders(this));
     DCHECK(mode_ == READ || (mode_ == READ_WRITE && partial_));
     next_state_ = STATE_CACHE_READ_DATA;
+    transaction_state_at_transition_to_reading_state_ =
+        TransactionState::kAsReader;
     return OK;
   }
 
+  transaction_state_at_transition_to_reading_state_ =
+      TransactionState::kAsWriter;
   DCHECK(mode_ & WRITE || mode_ == NONE);
 
   // If it's a writer and it is partial then it may need to read from the cache
@@ -632,11 +643,14 @@ void HttpCache::Transaction::SetValidatingCannotProceed() {
   entry_ = nullptr;
 }
 
-void HttpCache::Transaction::WriterAboutToBeRemovedFromEntry(int result) {
+void HttpCache::Transaction::WriterAboutToBeRemovedFromEntry(
+    int result,
+    WriterAboutToBeRemovedFromEntryCaller caller) {
   TRACE_EVENT_WITH_FLOW1(
       "net", "HttpCacheTransaction::WriterAboutToBeRemovedFromEntry",
       TRACE_ID_LOCAL(trace_id_),
       TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "result", result);
+  writer_about_to_be_removed_from_entry_caller_ = caller;
   // Since the transaction can no longer access the network transaction, save
   // all network related info now.
   if (moved_network_transaction_to_writers_ &&
@@ -654,11 +668,13 @@ void HttpCache::Transaction::WriterAboutToBeRemovedFromEntry(int result) {
     shared_writing_error_ = result;
 }
 
-void HttpCache::Transaction::WriteModeTransactionAboutToBecomeReader() {
+void HttpCache::Transaction::WriteModeTransactionAboutToBecomeReader(
+    WriteModeTransactionAboutToBecomeReaderCaller caller) {
   TRACE_EVENT_WITH_FLOW0(
       "net", "HttpCacheTransaction::WriteModeTransactionAboutToBecomeReader",
       TRACE_ID_LOCAL(trace_id_),
       TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  write_mode_transaction_about_to_become_reader_caller_ = caller;
   mode_ = READ;
   if (moved_network_transaction_to_writers_ &&
       entry_->writers->network_transaction()) {
@@ -2462,6 +2478,20 @@ int HttpCache::Transaction::DoNetworkReadComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheReadData() {
+  SCOPED_CRASH_KEY_STRING32(
+      "net", "transaction state",
+      ToString(transaction_state_at_transition_to_reading_state_));
+  if (entry_) {
+    CHECK(InWriters() || entry_->TransactionInReaders(this));
+    entry_->writers_done_writing_to_entry_history = absl::nullopt;
+  }
+  do_cache_read_data_last_call_ = DoCacheReadDataLastCall::kDoCacheReadData;
+  writer_about_to_be_removed_from_entry_caller_ =
+      WriterAboutToBeRemovedFromEntryCaller::kNone;
+  write_mode_transaction_about_to_become_reader_caller_ =
+      WriteModeTransactionAboutToBecomeReaderCaller::kNone;
+  has_called_done_with_entry_since_last_do_cache_read_data_ = false;
+
   TRACE_EVENT_WITH_FLOW2(
       "net", "HttpCacheTransaction::DoCacheReadData", TRACE_ID_LOCAL(trace_id_),
       TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "read_offset",
@@ -2487,6 +2517,44 @@ int HttpCache::Transaction::DoCacheReadData() {
 }
 
 int HttpCache::Transaction::DoCacheReadDataComplete(int result) {
+  SCOPED_CRASH_KEY_STRING32(
+      "net", "transaction state",
+      ToString(transaction_state_at_transition_to_reading_state_));
+  SCOPED_CRASH_KEY_NUMBER("net", "result", result);
+  SCOPED_CRASH_KEY_NUMBER("net", "DoCacheReadDataLastCall",
+                          static_cast<int>(do_cache_read_data_last_call_));
+  SCOPED_CRASH_KEY_BOOL("net", "!!partial", !!partial_);
+  SCOPED_CRASH_KEY_NUMBER(
+      "net", "WriterAboutToBeRemoved...",
+      static_cast<int>(writer_about_to_be_removed_from_entry_caller_));
+  SCOPED_CRASH_KEY_NUMBER(
+      "net", "WriteModeTransactionAbout...",
+      static_cast<int>(write_mode_transaction_about_to_become_reader_caller_));
+  SCOPED_CRASH_KEY_BOOL(
+      "net", "has called DoneWithEntry",
+      has_called_done_with_entry_since_last_do_cache_read_data_);
+  SCOPED_CRASH_KEY_BOOL("net", "being_removed_as_writer",
+                        being_removed_as_writer_);
+
+  const char* writers_done_writing_to_entry_history = "N/A.";
+  if (entry_) {
+    const auto& call_history = entry_->writers_done_writing_to_entry_history;
+    writers_done_writing_to_entry_history =
+        !call_history.has_value() ? "not called."
+        : call_history.value()    ? "called with success."
+                                  : "called with error.";
+  }
+  SCOPED_CRASH_KEY_STRING32("net", "WritersDoneWritingToEntry is ",
+                            writers_done_writing_to_entry_history);
+
+  CHECK_EQ(do_cache_read_data_last_call_,
+           DoCacheReadDataLastCall::kDoCacheReadData);
+  if (entry_) {
+    CHECK(InWriters() || entry_->TransactionInReaders(this));
+  }
+
+  do_cache_read_data_last_call_ =
+      DoCacheReadDataLastCall::kDoCacheReadDataComplete;
   TRACE_EVENT_WITH_FLOW1("net", "HttpCacheTransaction::DoCacheReadDataComplete",
                          TRACE_ID_LOCAL(trace_id_),
                          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT,
@@ -3304,6 +3372,15 @@ int HttpCache::Transaction::DoConnectedCallback() {
 
 int HttpCache::Transaction::DoConnectedCallbackComplete(int result) {
   if (result != OK) {
+    if (result ==
+        ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY) {
+      DoomInconsistentEntry();
+      UpdateCacheEntryStatus(CacheEntryStatus::ENTRY_OTHER);
+      TransitionToState(reading_ ? STATE_SEND_REQUEST
+                                 : STATE_HEADERS_PHASE_CANNOT_PROCEED);
+      return OK;
+    }
+
     if (result == ERR_INCONSISTENT_IP_ADDRESS_SPACE) {
       DoomInconsistentEntry();
     } else {
@@ -3470,6 +3547,7 @@ bool HttpCache::Transaction::StopCachingImpl(bool success) {
 }
 
 void HttpCache::Transaction::DoneWithEntry(bool entry_is_complete) {
+  has_called_done_with_entry_since_last_do_cache_read_data_ = true;
   if (!entry_)
     return;
 
@@ -3946,6 +4024,19 @@ void HttpCache::Transaction::UpdateSecurityHeadersBeforeForwarding() {
                                       stored_corp_header);
   }
   return;
+}
+
+const char* HttpCache::Transaction::ToString(TransactionState state) {
+  switch (state) {
+    case TransactionState::kUnknown:
+      return "unknown";
+    case TransactionState::kNetwork:
+      return "network";
+    case TransactionState::kAsWriter:
+      return "writer";
+    case TransactionState::kAsReader:
+      return "reader";
+  }
 }
 
 void HttpCache::Transaction::ChecksumHeaders() {

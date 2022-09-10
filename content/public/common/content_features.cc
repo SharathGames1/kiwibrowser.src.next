@@ -203,9 +203,6 @@ const base::Feature kClearCrossSiteCrossBrowsingContextGroupWindowName{
     "ClearCrossSiteCrossBrowsingContextGroupWindowName",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kClickPointerEvent{"ClickPointerEvent",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kCompositeBGColorAnimation{
     "CompositeBGColorAnimation", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -352,6 +349,15 @@ const char kFedCmIframeSupportFieldTrialParamName[] = "IframeSupport";
 const base::Feature kFedCmManifestValidation{"FedCmManifestValidation",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Enables usage of the FedCM API with multiple identity providers at the same
+// time.
+const base::Feature kFedCmMultipleIdentityProviders{
+    "FedCmMultipleIdentityProviders", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Field trial boolean parameter which indicates whether IdpSigninStatus API is
+// used in FedCM API.
+const char kFedCmIdpSigninStatusFieldTrialParamName[] = "IdpSigninStatus";
+
 // Enables usage of First Party Sets to determine cookie availability.
 constexpr base::Feature kFirstPartySets{"FirstPartySets",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
@@ -468,6 +474,13 @@ const base::Feature kInstalledAppsInCbd{"InstalledAppsInCbd",
 // general overview.
 const base::Feature kIsolatedWebApps{"IsolatedWebApps",
                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables process isolation of fenced content (content inside fenced frames)
+// from non-fenced content. See
+// https://github.com/WICG/fenced-frame/blob/master/explainer/process_isolation.md
+// for rationale and more details.
+const base::Feature kIsolateFencedFrames{"IsolateFencedFrames",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Alternative to switches::kIsolateOrigins, for turning on origin isolation.
 // List of origins to isolate has to be specified via
@@ -799,6 +812,20 @@ const base::Feature kRenderDocument{"RenderDocument",
 const base::Feature kSkipEarlyCommitPendingForCrashedFrame{
     "SkipEarlyCommitPendingForCrashedFrame", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enables skipping the service worker fetch handler if the fetch handler is
+// identified as ignorable.
+const base::Feature kServiceWorkerSkipIgnorableFetchHandler{
+    "ServiceWorkerSkipIgnorableFetchHandler",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// This feature param controls if the empty service worker fetch handler is
+// skipped.
+constexpr base::FeatureParam<bool> kSkipEmptyFetchHandler{
+    &kServiceWorkerSkipIgnorableFetchHandler,
+    "SkipEmptyFetchHandler",
+    false,
+};
+
 // Run video capture service in the Browser process as opposed to a dedicated
 // utility process
 const base::Feature kRunVideoCaptureServiceInBrowserProcess{
@@ -844,11 +871,6 @@ const base::Feature kServiceWorkerPaymentApps{"ServiceWorkerPaymentApps",
 const base::Feature kWebPaymentAPICSP{"WebPaymentAPICSP",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enable the basic-card payment method from the PaymentRequest API. This has
-// been disabled since M100 and is soon to be removed: crbug.com/1209835.
-const base::Feature kPaymentRequestBasicCard{"PaymentRequestBasicCard",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Use this feature to experiment terminating a service worker when it doesn't
 // control any clients: https://crbug.com/1043845.
 const base::Feature kServiceWorkerTerminationOnNoControllee{
@@ -870,11 +892,6 @@ const base::Feature kSharedArrayBufferOnDesktop{
 // https://www.chromestatus.com/feature/5687904902840320
 const base::Feature kSignedExchangeReportingForDistributors{
     "SignedExchangeReportingForDistributors", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Subresource prefetching+loading via Signed HTTP Exchange
-// https://www.chromestatus.com/feature/5126805474246656
-const base::Feature kSignedExchangeSubresourcePrefetch{
-    "SignedExchangeSubresourcePrefetch", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Origin-Signed HTTP Exchanges (for WebPackage Loading)
 // https://www.chromestatus.com/feature/5745285984681984
@@ -1060,6 +1077,10 @@ const base::Feature kVideoPlaybackQuality{"VideoPlaybackQuality",
 const base::Feature kV8VmFuture{"V8VmFuture",
                                 base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enables experimental JavaScript shared memory features.
+const base::Feature kJavaScriptExperimentalSharedMemory{
+    "JavaScriptExperimentalSharedMemory", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enable window controls overlays for desktop PWAs
 const base::Feature kWebAppWindowControlsOverlay{
     "WebAppWindowControlsOverlay", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -1199,6 +1220,22 @@ const base::Feature kBackgroundMediaRendererHasModerateBinding{
     "BackgroundMediaRendererHasModerateBinding",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
+// When this feature is enabled a cap is placed on the number of bindings held
+// by the BindingManager.
+const base::Feature kBindingManagerConnectionLimit{
+    "BindingManagerConnectionLimit", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// When this feature is enabled the BindingManager for non-low-end devices will
+// use a not perceptible binding for background renderers on Android Q+.
+const base::Feature kBindingManagerUseNotPerceptibleBinding{
+    "BindingManagerUseNotPerceptibleBinding",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Reduce the priority of GPU process when in background so it is more likely
+// to be killed first if the OS needs more memory.
+const base::Feature kReduceGpuPriorityOnBackground{
+    "ReduceGpuPriorityOnBackground", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Allows the use of an experimental feature to drop any AccessibilityEvents
 // that are not relevant to currently enabled accessibility services.
 const base::Feature kOnDemandAccessibilityEvents{
@@ -1226,6 +1263,10 @@ const base::Feature kWarmUpNetworkProcess{"WarmUpNetworkProcess",
 // using the kEnableExperimentalWebPlatformFeatures flag.
 // https://w3c.github.io/web-nfc/
 const base::Feature kWebNfc{"WebNFC", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Throttle begin frame if Android WebView isn't getting draws.
+const base::Feature kWebViewThrottleBackgroundBeginFrame{
+    "WebViewThrottleBackgroundBeginFrame", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // When the context menu is triggered, the browser allows motion in a small
 // region around the initial touch location menu to allow for finger jittering.

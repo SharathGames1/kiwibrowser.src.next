@@ -39,6 +39,7 @@
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "pdf/buildflags.h"
 #include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/common/scheduler/web_scheduler_tracked_feature.h"
 #include "third_party/blink/public/mojom/webshare/webshare.mojom.h"
@@ -209,11 +210,10 @@ IN_PROC_BROWSER_TEST_F(ChromeBackForwardCacheBrowserTest, BasicIframe) {
   EXPECT_TRUE(content::WaitForLoadStop(web_contents()));
 
   content::RenderFrameHost* rfh_b = nullptr;
-  rfh_a->ForEachRenderFrameHost(
-      base::BindLambdaForTesting([&](content::RenderFrameHost* rfh) {
-        if (rfh != rfh_a.get())
-          rfh_b = rfh;
-      }));
+  rfh_a->ForEachRenderFrameHost([&](content::RenderFrameHost* rfh) {
+    if (rfh != rfh_a.get())
+      rfh_b = rfh;
+  });
   EXPECT_TRUE(rfh_b);
   content::RenderFrameHostWrapper rfh_b_wrapper(rfh_b);
 
@@ -760,6 +760,7 @@ IN_PROC_BROWSER_TEST_P(ChromeBackForwardCacheBrowserWithEmbedTest,
       FROM_HERE);
 }
 
+#if BUILDFLAG(ENABLE_PDF)
 IN_PROC_BROWSER_TEST_P(ChromeBackForwardCacheBrowserWithEmbedTest,
                        DoesNotCachePageWithEmbeddedPdf) {
   const auto tag = GetParam();
@@ -788,6 +789,7 @@ IN_PROC_BROWSER_TEST_P(ChromeBackForwardCacheBrowserWithEmbedTest,
   // the blocklisted feature kContainsPlugins.
   ExpectNotRestoredReasonHaveInnerContents(FROM_HERE);
 }
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 IN_PROC_BROWSER_TEST_P(ChromeBackForwardCacheBrowserWithEmbedTest,
                        DoesNotCachePageWithEmbeddedPdfAppendedOnPageLoaded) {

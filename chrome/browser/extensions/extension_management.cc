@@ -36,7 +36,6 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_prefs.h"
@@ -460,7 +459,7 @@ void ExtensionManagement::Refresh() {
     default_settings_->installation_mode = INSTALLATION_BLOCKED;
   }
 
-  const base::DictionaryValue* subdict = NULL;
+  const base::DictionaryValue* subdict = nullptr;
   if (dict_pref &&
       dict_pref->GetDictionary(schema_constants::kWildcard, &subdict)) {
     if (!default_settings_->Parse(
@@ -470,7 +469,7 @@ void ExtensionManagement::Refresh() {
     }
 
     // Settings from new preference have higher priority over legacy ones.
-    const base::ListValue* list_value = NULL;
+    const base::ListValue* list_value = nullptr;
     if (subdict->GetList(schema_constants::kInstallSources, &list_value))
       install_sources_pref = list_value;
     if (subdict->GetList(schema_constants::kAllowedTypes, &list_value))
@@ -824,9 +823,9 @@ ExtensionManagementFactory* ExtensionManagementFactory::GetInstance() {
 }
 
 ExtensionManagementFactory::ExtensionManagementFactory()
-    : BrowserContextKeyedServiceFactory(
+    : ProfileKeyedServiceFactory(
           "ExtensionManagement",
-          BrowserContextDependencyManager::GetInstance()) {
+          ProfileSelections::BuildRedirectedInIncognito()) {
   DependsOn(InstallStageTrackerFactory::GetInstance());
 }
 
@@ -837,11 +836,6 @@ KeyedService* ExtensionManagementFactory::BuildServiceInstanceFor(
   TRACE_EVENT0("browser,startup",
                "ExtensionManagementFactory::BuildServiceInstanceFor");
   return new ExtensionManagement(Profile::FromBrowserContext(context));
-}
-
-content::BrowserContext* ExtensionManagementFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  return chrome::GetBrowserContextRedirectedInIncognito(context);
 }
 
 void ExtensionManagementFactory::RegisterProfilePrefs(

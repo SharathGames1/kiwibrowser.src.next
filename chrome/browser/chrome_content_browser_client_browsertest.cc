@@ -102,7 +102,7 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
                                         ->GetController()
                                         .GetLastCommittedEntry();
 
-  ASSERT_TRUE(entry != NULL);
+  ASSERT_TRUE(entry != nullptr);
   EXPECT_EQ(url, entry->GetURL());
   EXPECT_EQ(url, entry->GetVirtualURL());
 }
@@ -419,7 +419,7 @@ class PrefersContrastTest
 };
 
 IN_PROC_BROWSER_TEST_P(PrefersContrastTest, PrefersContrast) {
-  test_theme_.set_preferred_contrast(GetParam());
+  test_theme_.SetPreferredContrast(GetParam());
   browser()
       ->tab_strip_model()
       ->GetActiveWebContents()

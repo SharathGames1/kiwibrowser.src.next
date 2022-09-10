@@ -226,15 +226,12 @@ group("gn_all") {
     }
   }
 
-  if (!is_ios && !is_android && !is_fuchsia) {
-    deps += [ "//components/viz/demo:viz_demo" ]
-    if (!use_libfuzzer) {
-      # TODO(crbug.com/1241949): libcronet.$version.so fails to link in libfuzzer builds.
-      deps += [
-        "//components/cronet:cronet_tests",
-        "//components/cronet:cronet_unittests",
-      ]
-    }
+  if (!is_ios && !is_android) {
+    deps += [
+      "//components/cronet:cronet_tests",
+      "//components/cronet:cronet_unittests",
+      "//components/viz/demo:viz_demo",
+    ]
   }
 
   if (!is_ios) {
@@ -463,6 +460,7 @@ group("gn_all") {
       "//ash/keyboard/ui:keyboard_unittests",
       "//ash/webui:ash_webui_unittests",
       "//chrome/browser/metrics/perf:profile_provider_unittest",
+      "//chrome/test:ash_crosapi_browsertests",
       "//chrome/test:usage_time_limit_unittests",
       "//chromeos/components:chromeos_components_unittests",
       "//components/exo/wayland:wayland_client_compatibility_tests",
@@ -1010,6 +1008,7 @@ if (is_chromeos_ash) {
       "//components/exo/wayland:wayland_client_integration_tests",
       "//components/exo/wayland:wayland_client_perftests",
       "//components/exo/wayland:wayland_client_tests",
+      "//components/policy/test_support:fake_dmserver",
       "//media:media_unittests",
       "//media/capture:capture_unittests",
       "//sandbox/linux:chrome_sandbox",
@@ -1144,12 +1143,20 @@ if (!is_ios) {
       }
     }
     script_test("wpt_tests_isolate") {
-      script = "//testing/scripts/run_wpt_tests.py"
+      script = "//third_party/blink/tools/run_wpt_tests.py"
       data_deps = [
         "//chrome:chrome",
         "//chrome/test/chromedriver",
         "//third_party/blink/tools:wpt_tests_isolate",
         "//tools/imagediff",
+      ]
+    }
+    script_test("wpt_tests_isolate_content_shell") {
+      script = "//third_party/blink/tools/run_wpt_tests.py"
+      args = [ "--product=content_shell" ]
+      data_deps = [
+        ":blink_web_tests_support_data",
+        "//third_party/blink/tools:wpt_tests_isolate",
       ]
     }
   }
@@ -1369,7 +1376,6 @@ if (!is_ios) {
       "//third_party/blink/web_tests/overflow/",
       "//third_party/blink/web_tests/paint/",
       "//third_party/blink/web_tests/payments/",
-      "//third_party/blink/web_tests/pending_beacon/",
       "//third_party/blink/web_tests/permissionclient/",
       "//third_party/blink/web_tests/plugins/",
       "//third_party/blink/web_tests/pointer-lock/",
@@ -1450,6 +1456,9 @@ if (!is_ios) {
 
     args = _common_web_test_args
 
+    # Use --wpt-only to skip tests under web_tests/virtual/
+    args += [ "--wpt-only" ]
+
     data_deps = [ ":blink_web_tests_support_data" ]
     data = [
       "//third_party/blink/perf_tests/",
@@ -1473,6 +1482,7 @@ if (!is_ios) {
       # === List Test Cases folders here ===
       "//third_party/blink/web_tests/external/",
       "//third_party/blink/web_tests/wpt_internal/",
+      "//third_party/blink/web_tests/virtual/",
 
       # === Test Case Folders Ends ===
     ]
@@ -1584,12 +1594,9 @@ if (!is_ios) {
 
   script_test("blink_python_tests") {
     script = "//testing/scripts/run_isolated_script_test.py"
-    args = [
-      "@WrappedPath(" +
-          rebase_path("//third_party/blink/tools/run_blinkpy_tests.py",
-                      root_build_dir) + ")",
-      "--coverage",
-    ]
+    args = [ "@WrappedPath(" +
+             rebase_path("//third_party/blink/tools/run_blinkpy_tests.py",
+                         root_build_dir) + ")" ]
 
     data = [
       # These tests use //build/android/devil_chromium.py even when !is_android,

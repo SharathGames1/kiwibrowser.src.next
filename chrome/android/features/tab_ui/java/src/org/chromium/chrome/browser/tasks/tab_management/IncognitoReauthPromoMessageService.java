@@ -10,10 +10,12 @@ import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.INCOG
 import android.content.Context;
 import android.os.Build;
 
+import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthManager;
 import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthSettingUtils;
@@ -22,8 +24,13 @@ import org.chromium.chrome.browser.lifecycle.PauseResumeWithNativeObserver;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.user_prefs.UserPrefs;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 
 /**
  * Message service class to show the Incognito re-auth promo inside the incognito
@@ -36,6 +43,15 @@ public class IncognitoReauthPromoMessageService
      */
     @VisibleForTesting
     public static Boolean sIsPromoEnabledForTesting;
+
+    /**
+     * For instrumentation tests, we don't have the supported infrastructure to perform
+     * native re-authentication. Therefore, setting this variable would skip the re-auth
+     * triggering and simply call the next set of actions which would have been call, if
+     * the re-auth was indeed successful.
+     */
+    @VisibleForTesting
+    public static Boolean sTriggerReviewActionWithoutReauthForTesting;
 
     private final int mMaxPromoMessageCount = 10;
     /**
@@ -87,6 +103,20 @@ public class IncognitoReauthPromoMessageService
      * the Android level settings are on again. See #onResumeWithNative method.
      */
     private boolean mShouldTriggerPrepareMessage;
+
+    /**
+     * Represents the action type on the re-auth promo card.
+     * DO NOT reorder items in this interface, because it's mirrored to UMA
+     * (as IncognitoReauthPromoActionType).
+     */
+    @IntDef({IncognitoReauthPromoActionType.PROMO_ACCEPTED,
+            IncognitoReauthPromoActionType.NO_THANKS, IncognitoReauthPromoActionType.NUM_ENTRIES})
+    @Retention(RetentionPolicy.SOURCE)
+    @interface IncognitoReauthPromoActionType {
+        int PROMO_ACCEPTED = 0;
+        int NO_THANKS = 1;
+        int NUM_ENTRIES = 2;
+    }
 
     /**
      * @param mMessageType The type of the message.
@@ -172,6 +202,20 @@ public class IncognitoReauthPromoMessageService
         preparePromoMessage();
     }
 
+    void prepareSnackBarAndShow() {
+        Snackbar snackbar =
+                Snackbar.make(mContext.getString(R.string.incognito_reauth_snackbar_text),
+                        /*controller= */ null, Snackbar.TYPE_NOTIFICATION,
+                        Snackbar.UMA_INCOGNITO_REAUTH_ENABLED_FROM_PROMO);
+        // TODO(crbug.com/1227656):  Confirm with UX to see how the background color of the
+        // snackbar needs to be revised.
+        snackbar.setBackgroundColor(
+                mContext.getResources().getColor(R.color.snackbar_background_color_baseline_dark));
+        snackbar.setTextAppearance(R.style.TextAppearance_TextMedium_Secondary_Baseline_Light);
+        snackbar.setSingleLine(false);
+        mSnackBarManager.showSnackbar(snackbar);
+    }
+
     /**
      * A method to dismiss the re-auth promo, if the #isIncognitoReauthPromoMessageEnabled returns
      * false. This ensures any state change that may occur which results in the promo not being
@@ -195,6 +239,13 @@ public class IncognitoReauthPromoMessageService
             return;
         }
 
+        // Do the core review action without triggering a re-authentication for testing only.
+        if (sTriggerReviewActionWithoutReauthForTesting != null
+                && sTriggerReviewActionWithoutReauthForTesting) {
+            onAfterReviewActionSuccessful();
+            return;
+        }
+
         mIncognitoReauthManager.startReauthenticationFlow(
                 new IncognitoReauthManager.IncognitoReauthCallback() {
                     @Override
@@ -202,10 +253,7 @@ public class IncognitoReauthPromoMessageService
 
                     @Override
                     public void onIncognitoReauthSuccess() {
-                        UserPrefs.get(Profile.getLastUsedRegularProfile())
-                                .setBoolean(Pref.INCOGNITO_REAUTHENTICATION_FOR_ANDROID, true);
-                        dismiss();
-                        // TODO(crbug.com/1227656): Add logic to show a snackbar here.
+                        onAfterReviewActionSuccessful();
                     }
 
                     @Override
@@ -280,5 +328,20 @@ public class IncognitoReauthPromoMessageService
                 preparePromoMessage();
             }
         }
+    }
+
+    /**
+     * A method which gets fired when the re-authentication was successful after the review action.
+     */
+    private void onAfterReviewActionSuccessful() {
+        UserPrefs.get(Profile.getLastUsedRegularProfile())
+                .setBoolean(Pref.INCOGNITO_REAUTHENTICATION_FOR_ANDROID, true);
+        RecordHistogram.recordEnumeratedHistogram(
+                "Android.IncognitoReauth.PromoAcceptedOrDismissed",
+                IncognitoReauthPromoActionType.PROMO_ACCEPTED,
+                IncognitoReauthPromoActionType.NUM_ENTRIES);
+
+        dismiss();
+        prepareSnackBarAndShow();
     }
 }

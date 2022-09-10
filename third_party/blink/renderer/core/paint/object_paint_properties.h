@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINT_PROPERTIES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINT_PROPERTIES_H_
 
+#include <array>
 #include <memory>
 #include <utility>
 
@@ -163,6 +164,13 @@ class CORE_EXPORT ObjectPaintProperties {
            replaced_content_transform_ || scroll_translation_ ||
            transform_isolation_node_;
   }
+  bool HasCSSTransformPropertyNode() const {
+    return translate_ || rotate_ || scale_ || offset_ || transform_;
+  }
+  std::array<const TransformPaintPropertyNode*, 5>
+  AllCSSTransformPropertiesOutsideToInside() const {
+    return {Translate(), Rotate(), Scale(), Offset(), Transform()};
+  }
   ADD_TRANSFORM(PaintOffsetTranslation, paint_offset_translation_);
   ADD_TRANSFORM(StickyTranslation, sticky_translation_);
   ADD_TRANSFORM(AnchorScrollTranslation, anchor_scroll_translation_);
@@ -305,6 +313,12 @@ class CORE_EXPORT ObjectPaintProperties {
            "effect trees.";
   }
 #endif
+
+  void DirectlyUpdateTransformAndOrigin(
+      TransformPaintPropertyNode::TransformAndOrigin&& transform_and_origin) {
+    transform_->DirectlyUpdateTransformAndOrigin(
+        std::move(transform_and_origin));
+  }
 
  private:
   // Return true if the property tree structure changes (an existing node was

@@ -33,6 +33,7 @@
 #include "components/favicon_base/favicon_usage_data.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
+#include "components/history/core/browser/url_row.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "sql/init_status.h"
 #include "ui/base/page_transition_types.h"
@@ -220,6 +221,25 @@ class HistoryService : public KeyedService {
   void SetBrowsingTopicsAllowed(ContextID context_id,
                                 int nav_entry_id,
                                 const GURL& url);
+
+  // Updates the history database by setting the detected language of the page
+  // content.
+  // The page can be identified by the combination of the context id, the
+  // navigation entry id and the url. No-op if the page is not found.
+  void SetPageLanguageForVisit(ContextID context_id,
+                               int nav_entry_id,
+                               const GURL& url,
+                               const std::string& page_language);
+
+  // Updates the history database by setting the "password state", i.e. whether
+  // a password form was found on the page.
+  // The page can be identified by the combination of the context id, the
+  // navigation entry id and the url. No-op if the page is not found.
+  void SetPasswordStateForVisit(
+      ContextID context_id,
+      int nav_entry_id,
+      const GURL& url,
+      VisitContentAnnotations::PasswordState password_state);
 
   // Updates the history database with the content model annotations for the
   // visit.
@@ -530,8 +550,10 @@ class HistoryService : public KeyedService {
 
   // Clusters ------------------------------------------------------------------
 
-  // Add a `AnnotatedVisitRow`.
-  void AddContextAnnotationsForVisit(
+  // Sets or updates all on-close fields of the `VisitContextAnnotations`
+  // for the visit with the given `visit_id`. The on-visit fields remain
+  // unchanged.
+  void SetOnCloseContextAnnotationsForVisit(
       VisitID visit_id,
       const VisitContextAnnotations& visit_context_annotations);
 
@@ -713,12 +735,10 @@ class HistoryService : public KeyedService {
 
   // Observers ----------------------------------------------------------------
 
-  // Notify all HistoryServiceObservers registered that user is visiting a URL.
-  // The `row` ID will be set to the value that is currently in effect in the
-  // main history database.
-  void NotifyURLVisited(ui::PageTransition transition,
-                        const URLRow& row,
-                        base::Time visit_time);
+  // Notify all HistoryServiceObservers registered that there's a `new_visit`
+  // for `url_row`. This happens when the user visited the URL on this machine,
+  // or if Sync has brought over a remote visit onto this device.
+  void NotifyURLVisited(const URLRow& url_row, const VisitRow& new_visit);
 
   // Notify all HistoryServiceObservers registered that URLs have been added or
   // modified. `changed_urls` contains the list of affects URLs.

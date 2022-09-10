@@ -40,7 +40,7 @@
 #include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/external_date_time_chooser.h"
@@ -116,6 +116,7 @@ struct WebWindowFeatures;
 namespace mojom {
 namespace blink {
 class TextAutosizerPageInfo;
+class WindowFeatures;
 }
 }  // namespace mojom
 
@@ -219,11 +220,17 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                                     cc::PaintHoldingCommitTrigger) = 0;
 
   // Start a system drag and drop operation.
+  //
+  // The `cursor_offset` is the offset of the drag-point from the top-left of
+  // `drag_image`, which may not be the same as the top-left of
+  // `drag_obj_rect`.  For details, see the function header comment for:
+  // `blink::DragController::StartDrag()`.
   virtual void StartDragging(LocalFrame*,
                              const WebDragData&,
                              DragOperationsMask,
                              const SkBitmap& drag_image,
-                             const gfx::Point& drag_image_offset) = 0;
+                             const gfx::Vector2d& cursor_offset,
+                             const gfx::Rect& drag_obj_rect) = 0;
   virtual bool AcceptsLoadDrops() const = 0;
 
   // The LocalFrame pointer provides the ChromeClient with context about which
@@ -248,7 +255,7 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void Show(LocalFrame& frame,
                     LocalFrame& opener_frame,
                     NavigationPolicy navigation_policy,
-                    const gfx::Rect& initial_rect,
+                    const mojom::blink::WindowFeatures& window_features,
                     bool consumed_user_gesture) = 0;
 
   // All the parameters should be in viewport space. That is, if an event

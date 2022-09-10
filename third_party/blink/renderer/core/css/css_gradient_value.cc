@@ -283,8 +283,8 @@ static void ReplaceColorHintsWithColorStops(
 #if DCHECK_IS_ON()
     // Verify that offset_left <= x_0 <= x_1 <= ... <= x_8 <= offset_right.
     DCHECK_GE(new_stops[0].offset, offset_left);
-    for (int i = 1; i < 8; ++i) {
-      DCHECK_GE(new_stops[i].offset, new_stops[i - 1].offset);
+    for (int j = 1; j < 8; ++j) {
+      DCHECK_GE(new_stops[j].offset, new_stops[j - 1].offset);
     }
     DCHECK_GE(offset_right, new_stops[8].offset);
 #endif  // DCHECK_IS_ON()
@@ -359,7 +359,7 @@ void CSSGradientValue::AddComputedStops(
       case CSSValueID::kCurrentcolor:
         if (allow_visited_style) {
           stop.color_ = CSSColor::Create(
-              style.VisitedDependentColor(GetCSSPropertyColor()).Rgb());
+              style.VisitedDependentColor(GetCSSPropertyColor()));
         } else {
           stop.color_ = ComputedStyleUtils::CurrentColorOrValidColor(
               style, StyleColor(), CSSValuePhase::kComputedValue);
@@ -367,10 +367,8 @@ void CSSGradientValue::AddComputedStops(
         break;
       default:
         // TODO(crbug.com/929098) Need to pass an appropriate color scheme here.
-        stop.color_ =
-            CSSColor::Create(StyleColor::ColorFromKeyword(
-                                 value_id, mojom::blink::ColorScheme::kLight)
-                                 .Rgb());
+        stop.color_ = CSSColor::Create(StyleColor::ColorFromKeyword(
+            value_id, mojom::blink::ColorScheme::kLight));
     }
     AddStop(stop);
   }

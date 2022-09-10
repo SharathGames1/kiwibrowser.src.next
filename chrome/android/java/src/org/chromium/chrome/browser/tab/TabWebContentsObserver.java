@@ -201,9 +201,6 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
                 }
                 if (isInPrimaryMainFrame) mTab.didFinishPageLoad(url);
             }
-            PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
-            auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
-                    AuditEvent.OPEN_URL_SUCCESS, url.getSpec(), "");
         }
 
         @Override
@@ -221,11 +218,13 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
             assert description != null;
 
             PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
-            auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
-                    AuditEvent.OPEN_URL_FAILURE, failingUrl, description);
-            if (errorCode == BLOCKED_BY_ADMINISTRATOR) {
+            if (auditor != null) {
                 auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
-                        AuditEvent.OPEN_URL_BLOCKED, failingUrl, "");
+                        AuditEvent.OPEN_URL_FAILURE, failingUrl, description);
+                if (errorCode == BLOCKED_BY_ADMINISTRATOR) {
+                    auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
+                            AuditEvent.OPEN_URL_BLOCKED, failingUrl, "");
+                }
             }
         }
 
@@ -235,14 +234,22 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
         }
 
         @Override
-        public void didStartNavigation(NavigationHandle navigation) {
-            if (navigation.isInPrimaryMainFrame() && !navigation.isSameDocument()) {
+        public void didStartNavigationInPrimaryMainFrame(NavigationHandle navigation) {
+            if (!navigation.isSameDocument()) {
                 mTab.didStartPageLoad(navigation.getUrl());
             }
 
             RewindableIterator<TabObserver> observers = mTab.getTabObservers();
             while (observers.hasNext()) {
-                observers.next().onDidStartNavigation(mTab, navigation);
+                observers.next().onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
+            }
+        }
+
+        @Override
+        public void didStartNavigationNoop(NavigationHandle navigation) {
+            RewindableIterator<TabObserver> observers = mTab.getTabObservers();
+            while (observers.hasNext()) {
+                observers.next().onDidStartNavigationNoop(mTab, navigation);
             }
         }
 
@@ -263,9 +270,6 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
 
             if (navigation.errorCode() != NetError.OK) {
                 if (navigation.isInPrimaryMainFrame()) mTab.didFailPageLoad(navigation.errorCode());
-
-                recordErrorInPolicyAuditor(navigation.getUrl().getSpec(),
-                        navigation.errorDescription(), navigation.errorCode());
             }
             mLastUrl = navigation.getUrl();
 

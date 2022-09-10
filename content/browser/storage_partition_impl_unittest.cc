@@ -58,6 +58,8 @@
 #include "content/browser/interest_group/interest_group_manager_impl.h"
 #include "content/browser/interest_group/interest_group_permissions_cache.h"
 #include "content/browser/interest_group/interest_group_permissions_checker.h"
+#include "content/browser/private_aggregation/private_aggregation_manager.h"
+#include "content/browser/private_aggregation/private_aggregation_test_utils.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/generated_code_cache_settings.h"
@@ -106,7 +108,6 @@ using CookieDeletionFilterPtr = network::mojom::CookieDeletionFilterPtr;
 namespace content {
 namespace {
 
-const int kDefaultClientId = 42;
 const char kCacheKey[] = "key";
 const char kCacheValue[] = "cached value";
 
@@ -756,16 +757,16 @@ class StoragePartitionShaderClearTest : public testing::Test {
       : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         browser_context_(new TestBrowserContext()) {
     InitGpuDiskCacheFactorySingleton();
-    GetGpuDiskCacheFactorySingleton()->SetCacheInfo(
-        kDefaultClientId,
-        browser_context()->GetDefaultStoragePartition()->GetPath());
-    cache_ = GetGpuDiskCacheFactorySingleton()->Get(kDefaultClientId);
+
+    gpu::GpuDiskCacheType type = gpu::GpuDiskCacheType::kGlShaders;
+    auto handle = GetGpuDiskCacheFactorySingleton()->GetCacheHandle(
+        type, browser_context()->GetDefaultStoragePartition()->GetPath().Append(
+                  gpu::GetGpuDiskCacheSubdir(type)));
+    cache_ =
+        GetGpuDiskCacheFactorySingleton()->Create(handle, base::DoNothing());
   }
 
-  ~StoragePartitionShaderClearTest() override {
-    cache_ = nullptr;
-    GetGpuDiskCacheFactorySingleton()->RemoveCacheInfo(kDefaultClientId);
-  }
+  ~StoragePartitionShaderClearTest() override { cache_ = nullptr; }
 
   void InitCache() {
     net::TestCompletionCallback available_cb;
@@ -1697,7 +1698,7 @@ TEST_F(StoragePartitionImplTest, ConversionsClearDataForOrigin) {
   base::RunLoop run_loop;
   partition->ClearData(
       StoragePartition::REMOVE_DATA_MASK_ATTRIBUTION_REPORTING_SITE_CREATED, 0,
-      blink::StorageKey(source.common_info().impression_origin()), now, now,
+      blink::StorageKey(source.common_info().source_origin()), now, now,
       run_loop.QuitClosure());
   run_loop.Run();
 
@@ -1719,10 +1720,9 @@ TEST_F(StoragePartitionImplTest, ConversionsClearDataWrongMask) {
 
   // Arbitrary non-conversions mask.
   base::RunLoop run_loop;
-  partition->ClearData(
-      StoragePartition::REMOVE_DATA_MASK_COOKIES, 0,
-      blink::StorageKey(source.common_info().impression_origin()), now, now,
-      run_loop.QuitClosure());
+  partition->ClearData(StoragePartition::REMOVE_DATA_MASK_COOKIES, 0,
+                       blink::StorageKey(source.common_info().source_origin()),
+                       now, now, run_loop.QuitClosure());
   run_loop.Run();
   EXPECT_FALSE(GetAttributionReportsForTesting(attribution_manager).empty());
 }
@@ -1739,9 +1739,9 @@ TEST_F(StoragePartitionImplTest, ConversionsClearAllData) {
         GURL(base::StringPrintf("https://www.%d.test/", i)));
     auto source = SourceBuilder(now)
                       .SetExpiry(base::Days(2))
-                      .SetImpressionOrigin(origin)
+                      .SetSourceOrigin(origin)
                       .SetReportingOrigin(origin)
-                      .SetConversionOrigin(origin)
+                      .SetDestinationOrigin(origin)
                       .Build();
     attribution_manager->HandleSource(source);
   }
@@ -1769,9 +1769,9 @@ TEST_F(StoragePartitionImplTest, ConversionsClearDataForFilter) {
     auto conv = url::Origin::Create(
         GURL(base::StringPrintf("https://conv-%d.com/", i)));
     attribution_manager->HandleSource(SourceBuilder(now)
-                                          .SetImpressionOrigin(impression)
+                                          .SetSourceOrigin(impression)
                                           .SetReportingOrigin(reporter)
-                                          .SetConversionOrigin(conv)
+                                          .SetDestinationOrigin(conv)
                                           .SetExpiry(base::Days(2))
                                           .Build());
     attribution_manager->HandleTrigger(TriggerBuilder()
@@ -2142,6 +2142,115 @@ TEST_F(StoragePartitionImplTest, RemoveAggregationServiceData) {
   EXPECT_CALL(*aggregation_service_ptr,
               ClearData(kBeginTime, kEndTime, testing::Truly(is_filter_null),
                         testing::_))
+      .WillOnce(testing::Invoke(invoke_callback));
+  {
+    base::RunLoop run_loop;
+    partition->ClearData(kTestClearMask, kTestQuotaClearMask,
+                         blink::StorageKey(), kBeginTime, kEndTime,
+                         run_loop.QuitClosure());
+    run_loop.Run();
+  }
+}
+
+TEST_F(StoragePartitionImplTest, RemovePrivateAggregationData) {
+  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
+      browser_context()->GetDefaultStoragePartition());
+
+  auto private_aggregation_manager =
+      std::make_unique<MockPrivateAggregationManager>();
+  auto* private_aggregation_manager_ptr = private_aggregation_manager.get();
+  partition->OverridePrivateAggregationManagerForTesting(
+      std::move(private_aggregation_manager));
+
+  const uint32_t kTestClearMask =
+      StoragePartition::REMOVE_DATA_MASK_PRIVATE_AGGREGATION_INTERNAL;
+  const uint32_t kTestQuotaClearMask =
+      StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL;
+  const auto kTestOrigin = GURL("https://example.com");
+  const auto kOtherOrigin = GURL("https://example.net");
+  const auto kBeginTime = base::Time() + base::Hours(1);
+  const auto kEndTime = base::Time() + base::Hours(2);
+  const auto invoke_callback =
+      [](base::Time delete_begin, base::Time delete_end,
+         StoragePartition::StorageKeyMatcherFunction filter,
+         base::OnceClosure done) { std::move(done).Run(); };
+  const auto is_test_origin_valid =
+      [&kTestOrigin](
+          content::StoragePartition::StorageKeyMatcherFunction filter) {
+        return filter.Run(blink::StorageKey(url::Origin::Create(kTestOrigin)));
+      };
+  const auto is_other_origin_valid =
+      [&kOtherOrigin](
+          content::StoragePartition::StorageKeyMatcherFunction filter) {
+        return filter.Run(blink::StorageKey(url::Origin::Create(kOtherOrigin)));
+      };
+  const auto is_filter_null =
+      [&](content::StoragePartition::StorageKeyMatcherFunction filter) {
+        return filter.is_null();
+      };
+
+  // Verify that each of the StoragePartition interfaces for clearing origin
+  // based data calls aggregation service appropriately.
+  EXPECT_CALL(
+      *private_aggregation_manager_ptr,
+      ClearBudgetData(
+          base::Time(), base::Time::Max(),
+          testing::AllOf(testing::Truly(is_test_origin_valid),
+                         testing::Not(testing::Truly(is_other_origin_valid))),
+          testing::_))
+      .WillOnce(invoke_callback);
+  {
+    base::RunLoop run_loop;
+    partition->ClearDataForOrigin(kTestClearMask, kTestQuotaClearMask,
+                                  kTestOrigin, run_loop.QuitClosure());
+    run_loop.Run();
+    testing::Mock::VerifyAndClearExpectations(private_aggregation_manager_ptr);
+  }
+
+  EXPECT_CALL(
+      *private_aggregation_manager_ptr,
+      ClearBudgetData(
+          kBeginTime, kEndTime,
+          testing::AllOf(testing::Truly(is_test_origin_valid),
+                         testing::Not(testing::Truly(is_other_origin_valid))),
+          testing::_))
+      .WillOnce(testing::Invoke(invoke_callback));
+  {
+    base::RunLoop run_loop;
+    partition->ClearData(kTestClearMask, kTestQuotaClearMask,
+                         blink::StorageKey(url::Origin::Create(kTestOrigin)),
+                         kBeginTime, kEndTime, run_loop.QuitClosure());
+    run_loop.Run();
+    testing::Mock::VerifyAndClearExpectations(private_aggregation_manager_ptr);
+  }
+
+  EXPECT_CALL(
+      *private_aggregation_manager_ptr,
+      ClearBudgetData(
+          kBeginTime, kEndTime,
+          testing::AllOf(testing::Truly(is_test_origin_valid),
+                         testing::Not(testing::Truly(is_other_origin_valid))),
+          testing::_))
+      .WillOnce(testing::Invoke(invoke_callback));
+  {
+    base::RunLoop run_loop;
+    partition->ClearData(
+        kTestClearMask, kTestQuotaClearMask,
+        base::BindLambdaForTesting([&](const blink::StorageKey& storage_key,
+                                       storage::SpecialStoragePolicy* policy) {
+          return storage_key ==
+                 blink::StorageKey(url::Origin::Create(kTestOrigin));
+        }),
+        /*cookie_deletion_filter=*/nullptr,
+        /*perform_storage_cleanup=*/false, kBeginTime, kEndTime,
+        run_loop.QuitClosure());
+    run_loop.Run();
+    testing::Mock::VerifyAndClearExpectations(private_aggregation_manager_ptr);
+  }
+
+  EXPECT_CALL(*private_aggregation_manager_ptr,
+              ClearBudgetData(kBeginTime, kEndTime,
+                              testing::Truly(is_filter_null), testing::_))
       .WillOnce(testing::Invoke(invoke_callback));
   {
     base::RunLoop run_loop;

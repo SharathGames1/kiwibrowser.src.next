@@ -44,51 +44,6 @@ static_assert(std::size(kTypeNames) ==
                   static_cast<size_t>(Value::Type::LIST) + 1,
               "kTypeNames Has Wrong Size");
 
-std::unique_ptr<Value> CopyWithoutEmptyChildren(const Value& node);
-
-// Make a deep copy of |node|, but don't include empty lists or dictionaries
-// in the copy. It's possible for this function to return NULL and it
-// expects |node| to always be non-NULL.
-std::unique_ptr<Value> CopyListWithoutEmptyChildren(const Value& list) {
-  Value copy(Value::Type::LIST);
-  for (const auto& entry : list.GetListDeprecated()) {
-    std::unique_ptr<Value> child_copy = CopyWithoutEmptyChildren(entry);
-    if (child_copy)
-      copy.Append(std::move(*child_copy));
-  }
-  return copy.GetListDeprecated().empty()
-             ? nullptr
-             : std::make_unique<Value>(std::move(copy));
-}
-
-std::unique_ptr<DictionaryValue> CopyDictionaryWithoutEmptyChildren(
-    const DictionaryValue& dict) {
-  std::unique_ptr<DictionaryValue> copy;
-  for (auto it : dict.DictItems()) {
-    std::unique_ptr<Value> child_copy = CopyWithoutEmptyChildren(it.second);
-    if (child_copy) {
-      if (!copy)
-        copy = std::make_unique<DictionaryValue>();
-      copy->SetKey(it.first, std::move(*child_copy));
-    }
-  }
-  return copy;
-}
-
-std::unique_ptr<Value> CopyWithoutEmptyChildren(const Value& node) {
-  switch (node.type()) {
-    case Value::Type::LIST:
-      return CopyListWithoutEmptyChildren(static_cast<const ListValue&>(node));
-
-    case Value::Type::DICTIONARY:
-      return CopyDictionaryWithoutEmptyChildren(
-          static_cast<const DictionaryValue&>(node));
-
-    default:
-      return std::make_unique<Value>(node.Clone());
-  }
-}
-
 // Helper class to enumerate the path components from a StringPiece
 // without performing heap allocations. Components are simply separated
 // by single dots (e.g. "foo.bar.baz"  -> ["foo", "bar", "baz"]).
@@ -1116,26 +1071,6 @@ void Value::Append(Value&& value) {
   GetList().Append(std::move(value));
 }
 
-CheckedContiguousIterator<Value> Value::Insert(
-    CheckedContiguousConstIterator<Value> pos,
-    Value&& value) {
-  return GetList().Insert(pos, std::move(value));
-}
-
-bool Value::EraseListIter(CheckedContiguousConstIterator<Value> iter) {
-  const auto offset = iter - ListView(list()).begin();
-  auto list_iter = list().begin() + offset;
-  if (list_iter == list().end())
-    return false;
-
-  list().erase(list_iter);
-  return true;
-}
-
-size_t Value::EraseListValue(const Value& val) {
-  return GetList().EraseValue(val);
-}
-
 void Value::ClearList() {
   GetList().clear();
 }
@@ -1553,6 +1488,136 @@ void Value::WriteIntoTrace(perfetto::TracedValue context) const {
 }
 #endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
+///////////////////// DictAdapterForMigration ////////////////////
+
+DictAdapterForMigration::DictAdapterForMigration(
+    const Value::Dict& dict) noexcept
+    : dict_(dict) {}
+
+DictAdapterForMigration::DictAdapterForMigration(
+    const DictionaryValue& dict) noexcept
+    : dict_(dict.GetDict()) {}
+
+bool DictAdapterForMigration::empty() const {
+  return dict_.empty();
+}
+
+size_t DictAdapterForMigration::size() const {
+  return dict_.size();
+}
+
+DictAdapterForMigration::const_iterator DictAdapterForMigration::begin() const {
+  return dict_.begin();
+}
+
+DictAdapterForMigration::const_iterator DictAdapterForMigration::cbegin()
+    const {
+  return dict_.cbegin();
+}
+
+DictAdapterForMigration::const_iterator DictAdapterForMigration::end() const {
+  return dict_.end();
+}
+
+DictAdapterForMigration::const_iterator DictAdapterForMigration::cend() const {
+  return dict_.cend();
+}
+
+bool DictAdapterForMigration::contains(base::StringPiece key) const {
+  return dict_.contains(key);
+}
+
+Value::Dict DictAdapterForMigration::Clone() const {
+  return dict_.Clone();
+}
+
+const Value* DictAdapterForMigration::Find(StringPiece key) const {
+  return dict_.Find(key);
+}
+
+absl::optional<bool> DictAdapterForMigration::FindBool(StringPiece key) const {
+  return dict_.FindBool(key);
+}
+
+absl::optional<int> DictAdapterForMigration::FindInt(StringPiece key) const {
+  return dict_.FindInt(key);
+}
+
+absl::optional<double> DictAdapterForMigration::FindDouble(
+    StringPiece key) const {
+  return dict_.FindDouble(key);
+}
+const std::string* DictAdapterForMigration::FindString(StringPiece key) const {
+  return dict_.FindString(key);
+}
+
+const Value::BlobStorage* DictAdapterForMigration::FindBlob(
+    StringPiece key) const {
+  return dict_.FindBlob(key);
+}
+
+const Value::Dict* DictAdapterForMigration::FindDict(StringPiece key) const {
+  return dict_.FindDict(key);
+}
+
+const Value::List* DictAdapterForMigration::FindList(StringPiece key) const {
+  return dict_.FindList(key);
+}
+
+const Value* DictAdapterForMigration::FindByDottedPath(StringPiece path) const {
+  return dict_.FindByDottedPath(path);
+}
+
+absl::optional<bool> DictAdapterForMigration::FindBoolByDottedPath(
+    StringPiece path) const {
+  return dict_.FindBoolByDottedPath(path);
+}
+
+absl::optional<int> DictAdapterForMigration::FindIntByDottedPath(
+    StringPiece path) const {
+  return dict_.FindIntByDottedPath(path);
+}
+
+absl::optional<double> DictAdapterForMigration::FindDoubleByDottedPath(
+    StringPiece path) const {
+  return dict_.FindDoubleByDottedPath(path);
+}
+
+const std::string* DictAdapterForMigration::FindStringByDottedPath(
+    StringPiece path) const {
+  return dict_.FindStringByDottedPath(path);
+}
+
+const Value::BlobStorage* DictAdapterForMigration::FindBlobByDottedPath(
+    StringPiece path) const {
+  return dict_.FindBlobByDottedPath(path);
+}
+
+const Value::Dict* DictAdapterForMigration::FindDictByDottedPath(
+    StringPiece path) const {
+  return dict_.FindDictByDottedPath(path);
+}
+
+const Value::List* DictAdapterForMigration::FindListByDottedPath(
+    StringPiece path) const {
+  return dict_.FindListByDottedPath(path);
+}
+
+std::string DictAdapterForMigration::DebugString() const {
+  return dict_.DebugString();
+}
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+void DictAdapterForMigration::WriteIntoTrace(
+    perfetto::TracedValue context) const {
+  return dict_.WriteIntoTrace(std::move(context));
+}
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
+
+const Value::Dict& DictAdapterForMigration::dict_for_test() const {
+  return dict_;
+}
+
 ///////////////////// DictionaryValue ////////////////////
 
 // static
@@ -1711,15 +1776,6 @@ bool DictionaryValue::GetList(StringPiece path,
 bool DictionaryValue::GetList(StringPiece path, ListValue** out_value) {
   return as_const(*this).GetList(path,
                                  const_cast<const ListValue**>(out_value));
-}
-
-std::unique_ptr<DictionaryValue> DictionaryValue::DeepCopyWithoutEmptyChildren()
-    const {
-  std::unique_ptr<DictionaryValue> copy =
-      CopyDictionaryWithoutEmptyChildren(*this);
-  if (!copy)
-    copy = std::make_unique<DictionaryValue>();
-  return copy;
 }
 
 void DictionaryValue::Swap(DictionaryValue* other) {

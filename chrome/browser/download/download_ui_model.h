@@ -161,6 +161,9 @@ class DownloadUIModel {
                                   ui::ColorId color_id);
     BubbleUIInfo& AddPrimaryButton(DownloadCommands::Command command);
     BubbleUIInfo& AddCheckbox(const std::u16string& label);
+    // Add button to the subpage. Only two buttons are supported.
+    // The first one added is the primary, and the second one the secondary.
+    // The checkbox, if present, controls the secondary.
     BubbleUIInfo& AddSubpageButton(const std::u16string& label,
                                    DownloadCommands::Command command,
                                    bool is_prominent);
@@ -334,7 +337,7 @@ class DownloadUIModel {
 
   // Returns |true| if opening in the browser is preferred for this download. If
   // |false|, the download should be opened with the system default application.
-  virtual bool ShouldPreferOpeningInBrowser() const;
+  virtual bool ShouldPreferOpeningInBrowser();
 
   // Change what's returned by ShouldPreferOpeningInBrowser to |preference|.
   virtual void SetShouldPreferOpeningInBrowser(bool preference);
@@ -490,10 +493,11 @@ class DownloadUIModel {
                               DownloadCommands::Command command);
 
   // Gets the information about the download bubbles subpage.
-  BubbleUIInfo GetBubbleUIInfo() const;
+  BubbleUIInfo GetBubbleUIInfo(bool is_download_bubble_v2) const;
   BubbleUIInfo GetBubbleUIInfoForInterrupted(
       offline_items_collection::FailState fail_state) const;
-  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete() const;
+  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete(
+      bool is_download_bubble_v2) const;
 
   // Returns |true| if this download should be displayed in the download bubble.
   virtual bool ShouldShowInBubble() const;
@@ -514,6 +518,15 @@ class DownloadUIModel {
 
   // Whether the dropdown menu button should be shown or not.
   virtual bool ShouldShowDropdown() const;
+
+  // Determines if a download should be preferably opened in the browser instead
+  // of the platform. Use |is_filetype_handled_safely| indicating if opening a
+  // file of this type is safe in the current BrowserContext, |target_path| to
+  // see if files of this type should be opened in the browser, and set whether
+  // the download should be preferred opening in the browser.
+  virtual void DetermineAndSetShouldPreferOpeningInBrowser(
+      const base::FilePath& target_path,
+      bool is_filetype_handled_safely);
 
  protected:
   // Returns the MIME type of the download.

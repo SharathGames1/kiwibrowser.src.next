@@ -1279,7 +1279,15 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
       const NGPhysicalBoxFragment& operator*() const;
 
-      void operator++() { ++iterator_; }
+      Iterator& operator++() {
+        ++iterator_;
+        return *this;
+      }
+      Iterator operator++(int) {
+        Iterator copy = *this;
+        ++*this;
+        return copy;
+      }
 
       bool operator==(const Iterator& other) const {
         return iterator_ == other.iterator_;
@@ -2113,8 +2121,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
 
   // Returns true if this box is fixed position and will not move with
-  // scrolling.
-  bool IsFixedToView() const;
+  // scrolling. If the caller can pre-calculate |container_for_fixed_position|,
+  // it should pass it to avoid recalculation.
+  bool IsFixedToView(
+      const LayoutObject* container_for_fixed_position = nullptr) const;
 
   // Returns true if the overflow property should be respected. Otherwise
   // HasNonVisibleOverflow() will be false and we won't create scrollable area
@@ -2146,6 +2156,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     STACK_ALLOCATED();
   };
   AnchorScrollData ComputeAnchorScrollData() const;
+
+  // Utility function that returns and rounds accumulated_scroll_offset of
+  // AnchorScrollData as a PhysicalOffset.
+  PhysicalOffset ComputeAnchorScrollOffset() const;
 
  protected:
   ~LayoutBox() override;
