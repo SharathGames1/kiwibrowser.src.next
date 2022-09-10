@@ -42,7 +42,7 @@ _EXCLUDED_PATHS = (
     r"^v8[\\/].*",
     r".*MakeFile$",
     r".+_autogen\.h$",
-    r".+_pb2\.py$",
+    r".+_pb2(_grpc)?\.py$",
     r".+[\\/]pnacl_shim\.c$",
     r"^gpu[\\/]config[\\/].*_list_json\.cc$",
     r"tools[\\/]md_browser[\\/].*\.css$",
@@ -680,7 +680,7 @@ _BANNED_CPP_FUNCTIONS : Sequence[BanRule] = (
        '^gin/array_buffer\.(cc|h)',
        '^chrome/services/sharing/nearby/',
        # gRPC provides some C++ libraries that use std::shared_ptr<>.
-       '^chromeos/services/libassistant/grpc/',
+       '^chromeos/ash/services/libassistant/grpc/',
        '^chromecast/cast_core/grpc',
        '^chromecast/cast_core/runtime/browser',
        # Fuchsia provides C++ libraries that use std::shared_ptr<>.
@@ -1199,7 +1199,6 @@ _GENERIC_PYDEPS_FILES = [
     'components/module_installer/android/module_desc_java.pydeps',
     'content/public/android/generate_child_service.pydeps',
     'net/tools/testserver/testserver.pydeps',
-    'testing/scripts/run_wpt_tests.pydeps',
     'testing/scripts/run_isolated_script_test.pydeps',
     'testing/merge_scripts/standard_isolated_script_merge.pydeps',
     'testing/merge_scripts/standard_gtest_merge.pydeps',
@@ -1207,13 +1206,16 @@ _GENERIC_PYDEPS_FILES = [
     'testing/merge_scripts/code_coverage/merge_steps.pydeps',
     'third_party/android_platform/development/scripts/stack.pydeps',
     'third_party/blink/renderer/bindings/scripts/build_web_idl_database.pydeps',
+    'third_party/blink/renderer/bindings/scripts/check_generated_file_list.pydeps',
     'third_party/blink/renderer/bindings/scripts/collect_idl_files.pydeps',
     'third_party/blink/renderer/bindings/scripts/generate_bindings.pydeps',
     'third_party/blink/renderer/bindings/scripts/validate_web_idl.pydeps',
     'third_party/blink/tools/blinkpy/web_tests/merge_results.pydeps',
+    'third_party/blink/tools/run_wpt_tests.pydeps',
     'third_party/blink/tools/merge_web_test_results.pydeps',
     'tools/binary_size/sizes.pydeps',
     'tools/binary_size/supersize.pydeps',
+    'tools/perf/process_perf_results.pydeps',
 ]
 
 
@@ -2216,8 +2218,12 @@ def CheckNoProductIconsAddedToPublicRepo(input_api, output_api):
 
     results = []
     if errors:
+        # Give warnings instead of errors on presubmit --all and presubmit
+        # --files.
+        message_type = (output_api.PresubmitNotifyResult if input_api.no_diffs
+                        else output_api.PresubmitError)
         results.append(
-            output_api.PresubmitError(
+            message_type(
                 'Trademarked images should not be added to the public repo. '
                 'See crbug.com/944754', errors))
     return results

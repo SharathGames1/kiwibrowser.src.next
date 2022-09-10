@@ -34,7 +34,8 @@
 namespace chrome {
 namespace {
 
-UMABrowsingActivityObserver* g_uma_browsing_activity_observer_instance = NULL;
+UMABrowsingActivityObserver* g_uma_browsing_activity_observer_instance =
+    nullptr;
 
 }  // namespace
 
@@ -91,7 +92,7 @@ void UMABrowsingActivityObserver::Observe(
 void UMABrowsingActivityObserver::OnAppTerminating() const {
   LogTimeBeforeUpdate();
   delete g_uma_browsing_activity_observer_instance;
-  g_uma_browsing_activity_observer_instance = NULL;
+  g_uma_browsing_activity_observer_instance = nullptr;
 }
 
 void UMABrowsingActivityObserver::LogTimeBeforeUpdate() const {
@@ -188,12 +189,6 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
 
   // Record how many tab groups (including zero) are open across all windows.
   UMA_HISTOGRAM_COUNTS_100("TabGroups.UserGroupCountPerLoad", tab_group_count);
-
-  // Record how many tab groups are open across all windows.
-  if (tab_group_count != 0) {
-    UMA_HISTOGRAM_COUNTS_100("TabGroups.NonZeroUserGroupCountPerLoad",
-                             tab_group_count);
-  }
 
   // Record how many tabs are in the current group. Records 0 if the active tab
   // is not in a group.

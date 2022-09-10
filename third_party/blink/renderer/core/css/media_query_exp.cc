@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/css/css_math_function_value.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_impl.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenized_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
@@ -85,20 +86,16 @@ static inline bool FeatureWithValidIdent(const String& media_feature,
   if (media_feature == media_feature_names::kPrefersColorSchemeMediaFeature)
     return ident == CSSValueID::kDark || ident == CSSValueID::kLight;
 
-  if (RuntimeEnabledFeatures::PrefersContrastEnabled()) {
-    if (media_feature == media_feature_names::kPrefersContrastMediaFeature) {
-      return ident == CSSValueID::kNoPreference || ident == CSSValueID::kMore ||
-             ident == CSSValueID::kLess || ident == CSSValueID::kCustom;
-    }
+  if (media_feature == media_feature_names::kPrefersContrastMediaFeature) {
+    return ident == CSSValueID::kNoPreference || ident == CSSValueID::kMore ||
+           ident == CSSValueID::kLess || ident == CSSValueID::kCustom;
   }
 
   if (media_feature == media_feature_names::kPrefersReducedMotionMediaFeature)
     return ident == CSSValueID::kNoPreference || ident == CSSValueID::kReduce;
 
-  if (RuntimeEnabledFeatures::CSSDynamicRangeMediaQueriesEnabled()) {
-    if (media_feature == media_feature_names::kDynamicRangeMediaFeature)
-      return ident == CSSValueID::kStandard || ident == CSSValueID::kHigh;
-  }
+  if (media_feature == media_feature_names::kDynamicRangeMediaFeature)
+    return ident == CSSValueID::kStandard || ident == CSSValueID::kHigh;
 
   if (RuntimeEnabledFeatures::CSSVideoDynamicRangeMediaQueriesEnabled()) {
     if (media_feature == media_feature_names::kVideoDynamicRangeMediaFeature)
@@ -326,8 +323,12 @@ absl::optional<MediaQueryExpValue> MediaQueryExpValue::Consume(
   CSSParserContext::ParserModeOverridingScope scope(context, kHTMLStandardMode);
 
   if (CSSVariableParser::IsValidVariableName(media_feature)) {
-    if (const CSSValue* value =
-            CSSVariableParser::ParseDeclarationValue({range}, false, context)) {
+    CSSTokenizedValue tokenized_value{range};
+    if (CSSParserImpl::RemoveImportantAnnotationIfPresent(tokenized_value)) {
+      return absl::nullopt;
+    }
+    if (const CSSValue* value = CSSVariableParser::ParseDeclarationValue(
+            tokenized_value, false, context)) {
       while (!range.AtEnd())
         range.Consume();
       return MediaQueryExpValue(*value);

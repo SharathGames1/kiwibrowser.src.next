@@ -91,6 +91,7 @@ test("components_unittests") {
 
     additional_manifest_fragments = [
       "//build/config/fuchsia/test/fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
       "//build/config/fuchsia/test/network.shard.test-cml",
       "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
     ]
@@ -138,6 +139,7 @@ test("components_unittests") {
     "//components/favicon/core:unit_tests",
     "//components/favicon_base:unit_tests",
     "//components/feature_engagement:unit_tests",
+    "//components/file_access:unit_tests",
     "//components/filename_generation:unit_tests",
     "//components/flags_ui:unit_tests",
     "//components/gcm_driver:unit_tests",
@@ -327,6 +329,7 @@ test("components_unittests") {
       "//components/captive_portal/content:unit_tests",
       "//components/cast_certificate:unit_tests",
       "//components/cast_channel:unit_tests",
+      "//components/cast_receiver:unit_tests",
       "//components/cast_streaming:unit_tests",
       "//components/certificate_transparency:unit_tests",
       "//components/content_capture/browser:unit_tests",
@@ -462,6 +465,7 @@ test("components_unittests") {
     deps += [
       "//base:base_java_unittest_support",
       "//components/android_autofill/browser:unit_tests",
+      "//components/autofill_assistant/browser/android:unit_tests",
       "//components/autofill_assistant/content/browser:unit_tests",
       "//components/autofill_assistant/content/renderer:unit_tests",
       "//components/browser_ui/sms/android:unit_tests",
@@ -525,6 +529,7 @@ test("components_unittests") {
       # See comment in components / guest_view / browser / BUILD.gn for why
       # guest_view is currently non - mobile.
       "//components/guest_view/browser:unit_tests",
+      "//components/password_manager/services/password_strength:unit_tests",
       "//components/soda:unit_tests",
       "//components/storage_monitor:unit_tests",
       "//components/web_modal:unit_tests",
@@ -917,6 +922,7 @@ if (!is_ios) {
         "//components/browser_ui/client_certificate/android",
         "//components/browser_ui/client_certificate/android:java",
         "//components/download/internal/common:internal_java",
+        "//components/version_info",
         "//content/public/test/android:android_test_message_pump_support_java",
         "//content/shell:content_shell_app",
         "//content/test:android_test_message_pump_support",
@@ -939,6 +945,19 @@ if (!is_ios) {
         "//components/leveldb_proto",
         "//components/prefs:test_support",
         "//components/sync_preferences:test_support",
+      ]
+    }
+
+    if (is_chromeos) {
+      sources += [ "feedback/content/content_tracing_manager_browsertest.cc" ]
+      deps += [
+        "//base",
+        "//base/test:test_support",
+        "//components/feedback",
+        "//components/feedback/content",
+        "//services/network:test_support",
+        "//testing/gmock",
+        "//testing/gtest",
       ]
     }
 
@@ -966,6 +985,7 @@ if (!is_ios) {
       additional_manifest_fragments = [
         "//build/config/fuchsia/test/present_view.shard.test-cml",
         "//build/config/fuchsia/test/fonts.shard.test-cml",
+        "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
         "//build/config/fuchsia/test/network.shard.test-cml",
       ]
     }

@@ -61,6 +61,7 @@
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/dom/document_timing.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/live_node_list_registry.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
@@ -1197,6 +1198,8 @@ class CORE_EXPORT Document : public ContainerNode,
   // may otherwise be blocked.
   ScriptPromise hasStorageAccess(ScriptState* script_state);
   ScriptPromise requestStorageAccess(ScriptState* script_state);
+  ScriptPromise requestStorageAccessForSite(ScriptState* script_state,
+                                            const AtomicString& site);
 
   // Fragment directive API, currently used to feature detect text-fragments.
   // https://wicg.github.io/scroll-to-text-fragment/#feature-detectability
@@ -1210,6 +1213,15 @@ class CORE_EXPORT Document : public ContainerNode,
   ScriptPromise hasTrustToken(ScriptState* script_state,
                               const String& issuer,
                               ExceptionState&);
+
+  // Sends a query via Mojo to ask whether the user has a redemption record.
+  // This can reject on permissions errors (e.g. associating |issuer| with the
+  // top-level origin would exceed the top-level origin's limit on the number of
+  // associated issuers) or on other internal errors (e.g. the network service
+  // is unavailable).
+  ScriptPromise hasRedemptionRecord(ScriptState* script_state,
+                                    const String& issuer,
+                                    ExceptionState&);
 
   // The following implements the rule from HTML 4 for what valid names are.
   // To get this right for all the XML cases, we probably have to improve this
@@ -1333,6 +1345,8 @@ class CORE_EXPORT Document : public ContainerNode,
   void ParseDNSPrefetchControlHeader(const String&);
 
   void MarkFirstPaint();
+  void OnPaintFinished();
+  void OnLargestContentfulPaintUpdated();
   void FinishedParsing();
 
   void SetEncodingData(const DocumentEncodingData& new_data);
@@ -1352,6 +1366,8 @@ class CORE_EXPORT Document : public ContainerNode,
   const Vector<AnnotatedRegionValue>& AnnotatedRegions() const;
   void SetAnnotatedRegions(const Vector<AnnotatedRegionValue>&);
 
+  void RemovedEventListener(const AtomicString& event_type,
+                            const RegisteredEventListener&) final;
   void RemoveAllEventListeners() final;
 
   const SVGDocumentExtensions* SvgExtensions() const;
@@ -1449,6 +1465,8 @@ class CORE_EXPORT Document : public ContainerNode,
   // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-embed-element
   void DelayLoadEventUntilLayoutTreeUpdate();
 
+  const EventPath::NodePath& GetOrCalculateEventNodePath(Node& node);
+
   const DocumentTiming& GetTiming() const { return document_timing_; }
 
   bool ShouldMarkFontPerformance() const {
@@ -1523,11 +1541,22 @@ class CORE_EXPORT Document : public ContainerNode,
   HeapVector<Member<Element>>& PopupStack() { return popup_stack_; }
   const HeapVector<Member<Element>>& PopupStack() const { return popup_stack_; }
   bool PopupAutoShowing() const { return !popup_stack_.IsEmpty(); }
-  HeapHashSet<Member<Element>>& AllOpenPopUps() { return all_open_pop_ups_; }
   Element* TopmostPopupAutoOrHint() const;
   HeapHashSet<Member<Element>>& PopupsWaitingToHide() {
     return popups_waiting_to_hide_;
   }
+  const Element* PopUpMousedownTarget() const {
+    return pop_up_mousedown_target_;
+  }
+  void SetPopUpMousedownTarget(const Element*);
+
+  // Add an element to the set of elements that, because of CSS toggle
+  // creation, need style recalc done later.
+  void AddToRecalcStyleForToggle(Element* element);
+
+  // Call SetNeedsStyleRecalc for elements from AddToRecalcStyleForToggle;
+  // return whether any calls were made.
+  bool SetNeedsStyleRecalcForToggles();
 
   // A non-null template_document_host_ implies that |this| was created by
   // EnsureTemplateDocument().
@@ -1551,6 +1580,7 @@ class CORE_EXPORT Document : public ContainerNode,
   bool IsStopped() const {
     return lifecycle_.GetState() == DocumentLifecycle::kStopped;
   }
+  bool InPostLifecycleSteps() const;
 
   enum HttpRefreshType { kHttpRefreshFromHeader, kHttpRefreshFromMetaTag };
   void MaybeHandleHttpRefresh(const String&, HttpRefreshType);
@@ -2022,7 +2052,12 @@ class CORE_EXPORT Document : public ContainerNode,
   void ExecuteScriptsWaitingForResources();
   void ExecuteJavaScriptUrls();
 
-  enum class MilestoneForDelayedAsyncScript { kFirstPaint, kFinishedParsing };
+  enum class MilestoneForDelayedAsyncScript {
+    kFirstPaint,
+    kFinishedParsing,
+    kLcpCandidate,
+    kPaint,
+  };
   void MaybeExecuteDelayedAsyncScripts(MilestoneForDelayedAsyncScript);
 
   void LoadEventDelayTimerFired(TimerBase*);
@@ -2076,7 +2111,7 @@ class CORE_EXPORT Document : public ContainerNode,
   void DisplayNoneChangedForFrame();
 
   // Handles a connection error to |trust_token_query_answerer_| by rejecting
-  // all pending promises created by |hasTrustToken|.
+  // all pending promises created by |hasTrustToken| and |hasRedemptionRecord|.
   void TrustTokenQueryAnswererConnectionError();
 
   void RunPostPrerenderingActivationSteps();
@@ -2334,11 +2369,15 @@ class CORE_EXPORT Document : public ContainerNode,
   HeapVector<Member<Element>> popup_stack_;
   // The `popup=hint` that is currently showing, if any.
   Member<Element> popup_hint_showing_;
+  // The pop-up (if any) that received the most recent mousedown event.
+  Member<const Element> pop_up_mousedown_target_;
   // A set of popups for which hidePopUp() has been called, but animations are
   // still running.
   HeapHashSet<Member<Element>> popups_waiting_to_hide_;
-  // A set of all open pop-ups, of all types.
-  HeapHashSet<Member<Element>> all_open_pop_ups_;
+
+  // Elements that need to be restyled because a toggle was created on them,
+  // or a prior sibling, during the previous restyle.
+  HeapHashSet<Member<Element>> elements_needing_style_recalc_for_toggle_;
 
   int load_event_delay_count_;
 
@@ -2406,6 +2445,12 @@ class CORE_EXPORT Document : public ContainerNode,
   // Tracks and reports metrics of attempted font match attempts (both
   // successful and not successful) by the page.
   std::unique_ptr<FontMatchingMetrics> font_matching_metrics_;
+
+  // For a given node, cache the vector of nodes that defines its EventPath.
+  uint64_t event_node_path_dom_tree_version_;
+  typedef HeapHashMap<Member<Node>, Member<EventPath::NodePath>>
+      EventNodePathCache;
+  EventNodePathCache event_node_path_cache_;
 
 #if DCHECK_IS_ON()
   unsigned slot_assignment_recalc_forbidden_recursion_depth_ = 0;
@@ -2511,8 +2556,6 @@ class CORE_EXPORT Document : public ContainerNode,
   Member<RenderBlockingResourceManager> render_blocking_resource_manager_;
 
   bool rendering_has_begun_ = false;
-
-  int async_script_count_ = 0;
 
   DeclarativeShadowRootAllowState declarative_shadow_root_allow_state_ =
       DeclarativeShadowRootAllowState::kNotSet;

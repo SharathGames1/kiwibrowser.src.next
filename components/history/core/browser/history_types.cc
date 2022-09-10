@@ -279,22 +279,25 @@ HistoryAddPageArgs::HistoryAddPageArgs()
                          true,
                          absl::nullopt,
                          absl::nullopt,
+                         absl::nullopt,
                          absl::nullopt) {}
 
-HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
-                                       base::Time time,
-                                       ContextID context_id,
-                                       int nav_entry_id,
-                                       const GURL& referrer,
-                                       const RedirectList& redirects,
-                                       ui::PageTransition transition,
-                                       bool hidden,
-                                       VisitSource source,
-                                       bool did_replace_entry,
-                                       bool consider_for_ntp_most_visited,
-                                       absl::optional<std::u16string> title,
-                                       absl::optional<Opener> opener,
-                                       absl::optional<int64_t> bookmark_id)
+HistoryAddPageArgs::HistoryAddPageArgs(
+    const GURL& url,
+    base::Time time,
+    ContextID context_id,
+    int nav_entry_id,
+    const GURL& referrer,
+    const RedirectList& redirects,
+    ui::PageTransition transition,
+    bool hidden,
+    VisitSource source,
+    bool did_replace_entry,
+    bool consider_for_ntp_most_visited,
+    absl::optional<std::u16string> title,
+    absl::optional<Opener> opener,
+    absl::optional<int64_t> bookmark_id,
+    absl::optional<VisitContextAnnotations::OnVisitFields> context_annotations)
     : url(url),
       time(time),
       context_id(context_id),
@@ -308,7 +311,8 @@ HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
       consider_for_ntp_most_visited(consider_for_ntp_most_visited),
       title(title),
       opener(opener),
-      bookmark_id(bookmark_id) {}
+      bookmark_id(bookmark_id),
+      context_annotations(std::move(context_annotations)) {}
 
 HistoryAddPageArgs::HistoryAddPageArgs(const HistoryAddPageArgs& other) =
     default;
@@ -397,6 +401,46 @@ DeletionInfo::DeletionInfo(DeletionInfo&& other) noexcept = default;
 DeletionInfo& DeletionInfo::operator=(DeletionInfo&& rhs) noexcept = default;
 
 // Clusters --------------------------------------------------------------------
+
+VisitContextAnnotations::VisitContextAnnotations() = default;
+
+VisitContextAnnotations::VisitContextAnnotations(
+    const VisitContextAnnotations& other) = default;
+
+VisitContextAnnotations::~VisitContextAnnotations() = default;
+
+bool VisitContextAnnotations::operator==(
+    const VisitContextAnnotations& other) const {
+  return on_visit == other.on_visit &&
+         omnibox_url_copied == other.omnibox_url_copied &&
+         is_existing_part_of_tab_group == other.is_existing_part_of_tab_group &&
+         is_placed_in_tab_group == other.is_placed_in_tab_group &&
+         is_existing_bookmark == other.is_existing_bookmark &&
+         is_new_bookmark == other.is_new_bookmark &&
+         is_ntp_custom_link == other.is_ntp_custom_link &&
+         duration_since_last_visit == other.duration_since_last_visit &&
+         page_end_reason == other.page_end_reason &&
+         total_foreground_duration == other.total_foreground_duration;
+}
+
+bool VisitContextAnnotations::operator!=(
+    const VisitContextAnnotations& other) const {
+  return !(*this == other);
+}
+
+bool VisitContextAnnotations::OnVisitFields::operator==(
+    const VisitContextAnnotations::OnVisitFields& other) const {
+  return browser_type == other.browser_type && window_id == other.window_id &&
+         tab_id == other.tab_id && task_id == other.task_id &&
+         root_task_id == other.root_task_id &&
+         parent_task_id == other.parent_task_id &&
+         response_code == other.response_code;
+}
+
+bool VisitContextAnnotations::OnVisitFields::operator!=(
+    const VisitContextAnnotations::OnVisitFields& other) const {
+  return !(*this == other);
+}
 
 AnnotatedVisit::AnnotatedVisit() = default;
 AnnotatedVisit::AnnotatedVisit(URLRow url_row,

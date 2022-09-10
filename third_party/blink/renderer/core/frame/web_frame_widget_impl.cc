@@ -38,6 +38,7 @@
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -99,6 +100,7 @@
 #include "third_party/blink/renderer/core/input/context_menu_allowed_scope.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/touch_action_util.h"
+#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -131,6 +133,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint_worklet_paint_dispatcher.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/widget/input/main_thread_event_queue.h"
 #include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
@@ -542,7 +545,7 @@ void WebFrameWidgetImpl::OnStartStylusWriting(
   // the focused element is editable to continue writing.
   if (IsElementNotNullAndEditable(focused_element)) {
     std::move(callback).Run(
-        focused_element->BoundsInViewport(),
+        focused_element->BoundsInWidget(),
         frame->View()->FrameToViewport(GetAbsoluteCaretBounds()));
     return;
   }
@@ -1135,19 +1138,23 @@ void WebFrameWidgetImpl::CancelDrag() {
 void WebFrameWidgetImpl::StartDragging(const WebDragData& drag_data,
                                        DragOperationsMask operations_allowed,
                                        const SkBitmap& drag_image,
-                                       const gfx::Point& drag_image_offset) {
+                                       const gfx::Vector2d& cursor_offset,
+                                       const gfx::Rect& drag_obj_rect) {
   doing_drag_and_drop_ = true;
   if (drag_and_drop_disabled_) {
     DragSourceSystemDragEnded();
     return;
   }
 
-  gfx::Point offset_in_dips =
-      widget_base_->BlinkSpaceToFlooredDIPs(drag_image_offset);
+  gfx::Vector2d offset_in_dips =
+      widget_base_->BlinkSpaceToFlooredDIPs(gfx::Point() + cursor_offset)
+          .OffsetFromOrigin();
+  gfx::Rect drag_obj_rect_in_dips =
+      gfx::Rect(widget_base_->BlinkSpaceToFlooredDIPs(drag_obj_rect.origin()),
+                widget_base_->BlinkSpaceToFlooredDIPs(drag_obj_rect.size()));
   GetAssociatedFrameWidgetHost()->StartDragging(
-      drag_data, operations_allowed, drag_image,
-      gfx::Vector2d(offset_in_dips.x(), offset_in_dips.y()),
-      possible_drag_event_info_.Clone());
+      drag_data, operations_allowed, drag_image, offset_in_dips,
+      drag_obj_rect_in_dips, possible_drag_event_info_.Clone());
 }
 
 DragOperation WebFrameWidgetImpl::DragTargetDragEnterOrOver(
@@ -3605,9 +3612,11 @@ WebFrameWidgetImpl::GetImeTextSpansInfo(
 
   for (const auto& ime_text_span : ime_text_spans) {
     gfx::Rect rect;
-    unsigned length = ime_text_span.end_offset - ime_text_span.start_offset;
-    focused_frame->FirstRectForCharacterRange(ime_text_span.start_offset,
-                                              length, rect);
+    auto length = base::checked_cast<wtf_size_t>(ime_text_span.end_offset -
+                                                 ime_text_span.start_offset);
+    focused_frame->FirstRectForCharacterRange(
+        base::checked_cast<wtf_size_t>(ime_text_span.start_offset), length,
+        rect);
 
     ime_text_spans_info.push_back(ui::mojom::blink::ImeTextSpanInfo::New(
         ime_text_span, widget_base_->BlinkSpaceToEnclosedDIPs(rect)));
@@ -4322,6 +4331,21 @@ void WebFrameWidgetImpl::SetDeviceScaleFactorForTesting(float factor) {
 FrameWidgetTestHelper*
 WebFrameWidgetImpl::GetFrameWidgetTestHelperForTesting() {
   return nullptr;
+}
+
+void WebFrameWidgetImpl::PrepareForFinalLifecyclUpdateForTesting() {
+  ForEachLocalFrameControlledByWidget(
+      LocalRootImpl()->GetFrame(),
+      WTF::BindRepeating([](WebLocalFrameImpl* local_frame) {
+        LocalFrame* core_frame = local_frame->GetFrame();
+        if (!core_frame)
+          return;
+        Document* document = core_frame->GetDocument();
+        if (!document)
+          return;
+        if (auto* ds_controller = DeferredShapingController::From(*document))
+          ds_controller->ReshapeAllDeferred(ReshapeReason::kTesting);
+      }));
 }
 
 void WebFrameWidgetImpl::SetMayThrottleIfUndrawnFrames(

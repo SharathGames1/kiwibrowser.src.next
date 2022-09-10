@@ -71,6 +71,7 @@
 #include "content/browser/renderer_host/navigator.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
@@ -90,6 +91,7 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_process_host_priority_client.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
@@ -178,9 +180,7 @@
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
 #include "content/public/browser/android/child_process_importance.h"
-#include "content/public/common/content_client.h"
 #include "content/test/mock_overscroll_refresh_handler_android.h"
-#include "content/test/test_content_browser_client.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/events/android/event_handler_android.h"
@@ -412,7 +412,7 @@ blink::ParsedPermissionsPolicy CreateParsedPermissionsPolicyMatchesNone(
 // Check frame depth on node, widget, and process all match expected depth.
 void CheckFrameDepth(unsigned int expected_depth, FrameTreeNode* node) {
   EXPECT_EQ(expected_depth, node->current_frame_host()->GetFrameDepth());
-  RenderProcessHost::Priority priority =
+  RenderProcessHostPriorityClient::Priority priority =
       node->current_frame_host()->GetRenderWidgetHost()->GetPriority();
   EXPECT_EQ(expected_depth, priority.frame_depth);
   EXPECT_EQ(expected_depth,
@@ -5371,9 +5371,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 // B process to process the subframe's detached event and the disconnect
 // of the blink::WebView's blink::mojom::PageBroadcast mojo channel. In the bug,
 // the latter crashed while detaching the subframe's LocalFrame (triggered as
-// part of closing the RenderView), because this tried to access the subframe's
-// WebFrameWidget (from RenderFrameImpl::didChangeSelection), which had already
-// been cleared by the former.
+// part of closing the `blink::WebView`), because this tried to access the
+// subframe's WebFrameWidget (from RenderFrameImpl::didChangeSelection), which
+// had already been cleared by the former.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        CloseSubframeWidgetAndViewOnProcessExit) {
   GURL main_url(embedded_test_server()->GetURL(
@@ -5394,17 +5394,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Prevent b.com process from terminating right away once the subframe
   // navigates away from b.com below.  This is necessary so that the renderer
-  // process has time to process the closings of RenderWidget and RenderView,
-  // which is where the original bug was triggered.  Incrementing the keep alive
-  // ref count will cause RenderProcessHostImpl::Cleanup to forego process
-  // termination.
+  // process has time to process the closings of RenderWidget and
+  // `blink::WebView`, which is where the original bug was triggered.
+  // Incrementing the keep alive ref count will cause
+  // RenderProcessHostImpl::Cleanup to forego process termination.
   RenderProcessHost* subframe_process =
       root->child_at(0)->current_frame_host()->GetProcess();
   subframe_process->IncrementKeepAliveRefCount(0);
 
   // Navigate the subframe away from b.com.  Since this is the last active
-  // frame in the b.com process, this causes the RenderWidget and RenderView to
-  // be closed.
+  // frame in the b.com process, this causes the RenderWidget and
+  // `blink::WebView` to be closed.
   EXPECT_TRUE(NavigateToURLFromRenderer(
       root->child_at(0),
       embedded_test_server()->GetURL("a.com", "/title1.html")));
@@ -5873,13 +5873,13 @@ class ShowCreatedWindowInterceptor
 
   void ShowCreatedWindow(const blink::LocalFrameToken& opener_frame_token,
                          WindowOpenDisposition disposition,
-                         const gfx::Rect& initial_rect,
+                         blink::mojom::WindowFeaturesPtr window_features,
                          bool user_gesture,
                          ShowCreatedWindowCallback callback) override {
     show_callback_ = std::move(callback);
     opener_frame_token_ = opener_frame_token;
     user_gesture_ = user_gesture;
-    initial_rect_ = initial_rect;
+    window_features_ = std::move(window_features);
     disposition_ = disposition;
     std::move(test_callback_)
         .Run(render_frame_host_->GetRenderWidgetHost()->GetRoutingID());
@@ -5887,8 +5887,8 @@ class ShowCreatedWindowInterceptor
 
   void ResumeShowCreatedWindow() {
     GetForwardingInterface()->ShowCreatedWindow(
-        opener_frame_token_, disposition_, initial_rect_, user_gesture_,
-        std::move(show_callback_));
+        opener_frame_token_, disposition_, std::move(window_features_),
+        user_gesture_, std::move(show_callback_));
   }
 
  private:
@@ -5896,7 +5896,7 @@ class ShowCreatedWindowInterceptor
   base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback_;
   ShowCreatedWindowCallback show_callback_;
   blink::LocalFrameToken opener_frame_token_;
-  gfx::Rect initial_rect_;
+  blink::mojom::WindowFeaturesPtr window_features_;
   bool user_gesture_ = false;
   WindowOpenDisposition disposition_;
   mojo::test::ScopedSwapImplForTesting<
@@ -6365,8 +6365,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Navigate popup to b.com to recreate the b.com process.  When creating
   // opener proxies, |rvh| should be reused as a swapped out RVH.  In
-  // https://crbug.com/627893, recreating the opener RenderView was hitting a
-  // CHECK(params.swapped_out) in the renderer process, since its
+  // https://crbug.com/627893, recreating the opener `blink::WebView` was
+  // hitting a CHECK(params.swapped_out) in the renderer process, since its
   // RenderViewHost was brought into an active state by the navigation to
   // |stall_url| above, even though it never committed.
   GURL b_url(embedded_test_server()->GetURL("b.com", "/title3.html"));
@@ -6645,10 +6645,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 }
 
 // Test that when canceling a pending RenderFrameHost in the middle of a
-// redirect, and then killing the corresponding RenderView's renderer process,
-// the RenderViewHost isn't reused in an improper state later.  Previously this
-// led to a crash in CreateRenderView when recreating the RenderView due to a
-// stale main frame routing ID.  See https://crbug.com/627400.
+// redirect, and then killing the corresponding `blink::WebView`'s renderer
+// process, the RenderViewHost isn't reused in an improper state later.
+// Previously this led to a crash in CreateRenderView when recreating the
+// `blink::WebView` due to a stale main frame routing ID.  See
+// https://crbug.com/627400.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        ReuseNonLiveRenderViewHostAfterCancelPending) {
   GURL a_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
@@ -6685,9 +6686,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   crash_observer.Wait();
 
   // Navigate the second popup to b.com.  This used to crash when creating the
-  // RenderView, because it reused the RenderViewHost created by the canceled
-  // navigation to b.com, and that RenderViewHost had a stale main frame
-  // routing ID and active state.
+  // `blink::WebView`, because it reused the RenderViewHost created by the
+  // canceled navigation to b.com, and that RenderViewHost had a stale main
+  // frame routing ID and active state.
   EXPECT_TRUE(NavigateToURLInSameBrowsingInstance(popup2, b_url));
 }
 
@@ -10602,7 +10603,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FrameDepthTest) {
   FrameTreeNode* child0 = root->child_at(0);
   {
     EXPECT_EQ(1u, child0->current_frame_host()->GetFrameDepth());
-    RenderProcessHost::Priority priority =
+    RenderProcessHostPriorityClient::Priority priority =
         child0->current_frame_host()->GetRenderWidgetHost()->GetPriority();
     // Same site instance as root.
     EXPECT_EQ(0u, priority.frame_depth);
@@ -10623,7 +10624,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FrameDepthTest) {
   FrameTreeNode* grand_child = root->child_at(1)->child_at(0);
   {
     EXPECT_EQ(2u, grand_child->current_frame_host()->GetFrameDepth());
-    RenderProcessHost::Priority priority =
+    RenderProcessHostPriorityClient::Priority priority =
         grand_child->current_frame_host()->GetRenderWidgetHost()->GetPriority();
     EXPECT_EQ(2u, priority.frame_depth);
     // Same process as root

@@ -79,7 +79,7 @@
 #include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/browser/payments/payment_app_context_impl.h"
 #include "content/browser/preloading/prerender/prerender_host_registry.h"
-#include "content/browser/private_aggregation/private_aggregation_features.h"
+#include "content/browser/private_aggregation/private_aggregation_manager.h"
 #include "content/browser/private_aggregation/private_aggregation_manager_impl.h"
 #include "content/browser/push_messaging/push_messaging_context.h"
 #include "content/browser/quota/quota_context.h"
@@ -93,6 +93,7 @@
 #include "content/browser/ssl_private_key_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/worker_host/shared_worker_service_impl.h"
+#include "content/common/private_aggregation_features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -101,6 +102,7 @@
 #include "content/public/browser/login_delegate.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/permission_controller.h"
+#include "content/public/browser/permission_result.h"
 #include "content/public/browser/service_process_host.h"
 #include "content/public/browser/session_storage_usage_info.h"
 #include "content/public/browser/shared_cors_origin_access_list.h"
@@ -971,6 +973,7 @@ class StoragePartitionImpl::DataDeletionHelper {
       InterestGroupManagerImpl* interest_group_manager,
       AttributionManager* attribution_manager,
       AggregationService* aggregation_service,
+      PrivateAggregationManager* private_aggregation_manager,
       storage::SharedStorageManager* shared_storage_manager,
       bool perform_storage_cleanup,
       const base::Time begin,
@@ -1003,7 +1006,8 @@ class StoragePartitionImpl::DataDeletionHelper {
     kAggregationService = 9,
     kSharedStorage = 10,
     kGpuCache = 11,
-    kMaxValue = kGpuCache,
+    kPrivateAggregation = 12,
+    kMaxValue = kPrivateAggregation,
   };
 
   base::OnceClosure CreateTaskCompletionClosure(TracingDataType data_type);
@@ -1724,7 +1728,7 @@ storage::SharedStorageManager* StoragePartitionImpl::GetSharedStorageManager() {
   return shared_storage_manager_.get();
 }
 
-PrivateAggregationManagerImpl*
+PrivateAggregationManager*
 StoragePartitionImpl::GetPrivateAggregationManager() {
   DCHECK(initialized_);
   return private_aggregation_manager_.get();
@@ -2037,10 +2041,10 @@ void StoragePartitionImpl::OnCanSendReportingReports(
 
   std::vector<url::Origin> origins_out;
   for (auto& origin : origins) {
-    bool allowed =
-        permission_controller->GetPermissionStatusForOriginWithoutContext(
-            blink::PermissionType::BACKGROUND_SYNC, origin) ==
-        blink::mojom::PermissionStatus::GRANTED;
+    bool allowed = permission_controller
+                       ->GetPermissionResultForOriginWithoutContext(
+                           blink::PermissionType::BACKGROUND_SYNC, origin)
+                       .status == blink::mojom::PermissionStatus::GRANTED;
     if (allowed)
       origins_out.push_back(origin);
   }
@@ -2049,16 +2053,16 @@ void StoragePartitionImpl::OnCanSendReportingReports(
 }
 
 void StoragePartitionImpl::OnCanSendDomainReliabilityUpload(
-    const GURL& origin,
+    const url::Origin& origin,
     OnCanSendDomainReliabilityUploadCallback callback) {
   DCHECK(initialized_);
   PermissionController* permission_controller =
       browser_context_->GetPermissionController();
   std::move(callback).Run(
-      permission_controller->GetPermissionStatusForOriginWithoutContext(
-          blink::PermissionType::BACKGROUND_SYNC,
-          url::Origin::Create(origin)) ==
-      blink::mojom::PermissionStatus::GRANTED);
+      permission_controller
+          ->GetPermissionResultForOriginWithoutContext(
+              blink::PermissionType::BACKGROUND_SYNC, origin)
+          .status == blink::mojom::PermissionStatus::GRANTED);
 }
 
 void StoragePartitionImpl::OnClearSiteData(
@@ -2201,8 +2205,8 @@ void StoragePartitionImpl::ClearDataImpl(
       quota_manager_.get(), special_storage_policy_.get(),
       filesystem_context_.get(), GetCookieManagerForBrowserProcess(),
       interest_group_manager_.get(), attribution_manager_.get(),
-      aggregation_service_.get(), shared_storage_manager_.get(),
-      perform_storage_cleanup, begin, end);
+      aggregation_service_.get(), private_aggregation_manager_.get(),
+      shared_storage_manager_.get(), perform_storage_cleanup, begin, end);
 }
 
 void StoragePartitionImpl::DeletionHelperDone(base::OnceClosure callback) {
@@ -2404,6 +2408,7 @@ void StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread(
     InterestGroupManagerImpl* interest_group_manager,
     AttributionManager* attribution_manager,
     AggregationService* aggregation_service,
+    PrivateAggregationManager* private_aggregation_manager,
     storage::SharedStorageManager* shared_storage_manager,
     bool perform_storage_cleanup,
     const base::Time begin,
@@ -2505,11 +2510,16 @@ void StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread(
         GetGpuDiskCacheFactorySingleton();
     // May be null in tests where it is difficult to plumb through a test
     // storage partition.
-    if (gpu_cache_factory) {
-      gpu_cache_factory->ClearByPath(
-          path, begin, end,
-          base::BindOnce(&ClearedGpuCache, CreateTaskCompletionClosure(
-                                               TracingDataType::kGpuCache)));
+    if (!path.empty() && gpu_cache_factory) {
+      // Clear the path for all the different GPU cache sub-types.
+      base::RepeatingClosure barrier = base::BarrierClosure(
+          gpu::kGpuDiskCacheTypes.size(),
+          CreateTaskCompletionClosure(TracingDataType::kGpuCache));
+      for (gpu::GpuDiskCacheType type : gpu::kGpuDiskCacheTypes) {
+        gpu_cache_factory->ClearByPath(
+            path.Append(gpu::GetGpuDiskCacheSubdir(type)), begin, end,
+            base::BindOnce(&ClearedGpuCache, barrier));
+      }
     }
   }
 
@@ -2539,6 +2549,13 @@ void StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread(
     aggregation_service->ClearData(
         begin, end, filter,
         CreateTaskCompletionClosure(TracingDataType::kAggregationService));
+  }
+
+  if (private_aggregation_manager &&
+      (remove_mask_ & REMOVE_DATA_MASK_PRIVATE_AGGREGATION_INTERNAL)) {
+    private_aggregation_manager->ClearBudgetData(
+        begin, end, filter,
+        CreateTaskCompletionClosure(TracingDataType::kPrivateAggregation));
   }
 
   // TODO(crbug.com/1340250): The Plugin Private File System is removed, but
@@ -2824,8 +2841,7 @@ void StoragePartitionImpl::OverrideAttributionManagerForTesting(
 }
 
 void StoragePartitionImpl::OverridePrivateAggregationManagerForTesting(
-    std::unique_ptr<PrivateAggregationManagerImpl>
-        private_aggregation_manager) {
+    std::unique_ptr<PrivateAggregationManager> private_aggregation_manager) {
   DCHECK(initialized_);
   private_aggregation_manager_ = std::move(private_aggregation_manager);
 }
@@ -2902,6 +2918,22 @@ void StoragePartitionImpl::InitNetworkContext() {
   }
 }
 
+network::mojom::URLLoaderFactoryParamsPtr
+StoragePartitionImpl::CreateURLLoaderFactoryParams() {
+  network::mojom::URLLoaderFactoryParamsPtr params =
+      network::mojom::URLLoaderFactoryParams::New();
+  params->process_id = network::mojom::kBrowserProcessId;
+  params->automatically_assign_isolation_info = true;
+  params->is_corb_enabled = false;
+  params->is_trusted = true;
+  params->url_loader_network_observer =
+      CreateAuthCertObserverForServiceWorker();
+  params->disable_web_security =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWebSecurity);
+  return params;
+}
+
 network::mojom::URLLoaderFactory*
 StoragePartitionImpl::GetURLLoaderFactoryForBrowserProcessInternal() {
   // Create the URLLoaderFactory as needed, but make sure not to reuse a
@@ -2914,16 +2946,7 @@ StoragePartitionImpl::GetURLLoaderFactoryForBrowserProcessInternal() {
   }
 
   network::mojom::URLLoaderFactoryParamsPtr params =
-      network::mojom::URLLoaderFactoryParams::New();
-  params->process_id = network::mojom::kBrowserProcessId;
-  params->automatically_assign_isolation_info = true;
-  params->is_corb_enabled = false;
-  params->is_trusted = true;
-  params->url_loader_network_observer =
-      CreateAuthCertObserverForServiceWorker();
-  params->disable_web_security =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableWebSecurity);
+      CreateURLLoaderFactoryParams();
   url_loader_factory_for_browser_process_.reset();
   if (!GetCreateURLLoaderFactoryCallback()) {
     GetNetworkContext()->CreateURLLoaderFactory(

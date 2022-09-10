@@ -129,7 +129,7 @@ class MockInputApi(object):
   def PresubmitLocalPath(self):
     return self.presubmit_local_path
 
-  def ReadFile(self, filename, mode='rU'):
+  def ReadFile(self, filename, mode='r'):
     if hasattr(filename, 'AbsoluteLocalPath'):
        filename = filename.AbsoluteLocalPath()
     for file_ in self.files:
@@ -257,6 +257,7 @@ class MockChange(object):
 
   def __init__(self, changed_files):
     self._changed_files = changed_files
+    self.author_email = None
     self.footers = defaultdict(list)
 
   def LocalPaths(self):

@@ -51,6 +51,11 @@ class TestingDownloadCoreService : public DownloadCoreService {
     return nullptr;
   }
 
+  DownloadUIController* GetDownloadUIController() override {
+    ADD_FAILURE();
+    return nullptr;
+  }
+
   DownloadHistory* GetDownloadHistory() override {
     ADD_FAILURE();
     return nullptr;
@@ -75,6 +80,8 @@ class TestingDownloadCoreService : public DownloadCoreService {
   }
 
   bool IsDownloadUiEnabled() override { return true; }
+
+  bool IsDownloadObservedByExtension() override { return false; }
 
   // KeyedService
   void Shutdown() override {}

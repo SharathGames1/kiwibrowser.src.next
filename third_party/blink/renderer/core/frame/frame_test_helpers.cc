@@ -52,6 +52,7 @@
 #include "third_party/blink/public/mojom/frame/frame_replication_state.mojom.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/tree_scope_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/touch_event.mojom-blink.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/platform/interface_registry.h"
@@ -181,6 +182,7 @@ void LoadFrameDontWait(WebLocalFrame* frame, const WebURL& url) {
   } else {
     auto params = std::make_unique<WebNavigationParams>();
     params->url = url;
+    params->storage_key = BlinkStorageKey(SecurityOrigin::Create(url));
     params->navigation_timings.navigation_start = base::TimeTicks::Now();
     params->navigation_timings.fetch_start = base::TimeTicks::Now();
     params->is_browser_initiated = true;
@@ -598,9 +600,8 @@ TestWebFrameWidget* WebViewHelper::CreateFrameWidgetAndInitializeCompositing(
       GetSynchronousSingleThreadLayerTreeSettings();
   display::ScreenInfos initial_screen_infos(
       frame_widget->GetInitialScreenInfo());
-  frame_widget->InitializeCompositing(frame_widget->GetAgentGroupScheduler(),
-                                      initial_screen_infos,
-                                      &layer_tree_settings);
+  frame_widget->InitializeCompositing(
+      *agent_group_scheduler_, initial_screen_infos, &layer_tree_settings);
   // This runs WidgetInputHandlerManager::InitOnInputHandlingThread, which will
   // set up the InputHandlerProxy.
   frame_widget->FlushInputHandlerTasks();
@@ -888,7 +889,8 @@ void TestWebFrameWidget::DispatchThroughCcInputHandler(
              mojom::blink::InputEventResultSource, const ui::LatencyInfo&,
              mojom::blink::InputEventResultState,
              mojom::blink::DidOverscrollParamsPtr overscroll,
-             mojom::blink::TouchActionOptionalPtr) {
+             mojom::blink::TouchActionOptionalPtr,
+             mojom::blink::ScrollResultDataPtr) {
             if (widget)
               widget->last_overscroll_ = std::move(overscroll);
           },
@@ -1004,7 +1006,8 @@ void TestWebFrameWidgetHost::StartDragging(
     const blink::WebDragData& drag_data,
     blink::DragOperationsMask operations_allowed,
     const SkBitmap& bitmap,
-    const gfx::Vector2d& bitmap_offset_in_dip,
+    const gfx::Vector2d& cursor_offset_in_dip,
+    const gfx::Rect& drag_obj_rect_in_dip,
     mojom::blink::DragEventSourceInfoPtr event_info) {}
 
 void TestWebFrameWidgetHost::BindWidgetHost(

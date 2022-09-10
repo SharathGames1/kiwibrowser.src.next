@@ -29,7 +29,6 @@ class MockIdleDeadlineScheduler final : public ThreadScheduler {
   }
   void Shutdown() override {}
   bool ShouldYieldForHighPriorityWork() override { return true; }
-  bool CanExceedIdleDeadlineIfRequired() const override { return false; }
   void PostIdleTask(const base::Location&, Thread::IdleTask) override {}
   void PostDelayedIdleTask(const base::Location&,
                            base::TimeDelta,
@@ -48,10 +47,6 @@ class MockIdleDeadlineScheduler final : public ThreadScheduler {
   void AddTaskObserver(Thread::TaskObserver* task_observer) override {}
 
   void RemoveTaskObserver(Thread::TaskObserver* task_observer) override {}
-
-  void AddRAILModeObserver(RAILModeObserver*) override {}
-
-  void RemoveRAILModeObserver(RAILModeObserver const*) override {}
 
   void SetV8Isolate(v8::Isolate* isolate) override {}
 };

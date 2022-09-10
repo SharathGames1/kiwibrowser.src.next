@@ -42,6 +42,7 @@
 #include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/pref_names.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -93,10 +94,11 @@ static bool enable_background_extensions_during_testing = false;
 
 std::string GenerateId(const base::DictionaryValue* manifest,
                        const base::FilePath& path) {
-  std::string raw_key;
   std::string id_input;
-  CHECK(manifest->GetString(manifest_keys::kPublicKey, &raw_key));
-  CHECK(Extension::ParsePEMKeyBytes(raw_key, &id_input));
+  const std::string* raw_key =
+      manifest->GetDict().FindString(manifest_keys::kPublicKey);
+  CHECK(raw_key != nullptr);
+  CHECK(Extension::ParsePEMKeyBytes(*raw_key, &id_input));
   std::string id = crx_file::id_util::GenerateId(id_input);
   return id;
 }
@@ -122,7 +124,7 @@ std::unique_ptr<base::DictionaryValue> LoadManifestOnFileThread(
     // from a read-only rootfs partition, so it is safe to set
     // |gzip_permission| to kAllowForTrustedSource.
     bool localized = extension_l10n_util::LocalizeExtension(
-        root_directory, manifest.get(),
+        root_directory, &manifest->GetDict(),
         extension_l10n_util::GzippedMessagesPermission::kAllowForTrustedSource,
         &error);
     CHECK(localized) << error;
@@ -188,7 +190,8 @@ void ComponentLoader::LoadAll() {
 std::unique_ptr<base::DictionaryValue> ComponentLoader::ParseManifest(
     base::StringPiece manifest_contents) const {
   JSONStringValueDeserializer deserializer(manifest_contents);
-  std::unique_ptr<base::Value> manifest = deserializer.Deserialize(NULL, NULL);
+  std::unique_ptr<base::Value> manifest =
+      deserializer.Deserialize(nullptr, nullptr);
 
   if (!manifest.get() || !manifest->is_dict()) {
     LOG(ERROR) << "Failed to parse extension manifest.";
@@ -435,7 +438,7 @@ void ComponentLoader::AddDefaultComponentExtensions(
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   AddKeyboardApp();
-#else  // BUILDFLAG(IS_CHROMEOS_ASH)
+#else   // BUILDFLAG(IS_CHROMEOS_ASH)
   DCHECK(!skip_session_components);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -550,7 +553,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   if (base::FeatureList::IsEnabled(
-          extensions_features::kLoadCryptoTokenExtension)) {
+          extensions_features::kLoadCryptoTokenExtension) ||
+      ExtensionPrefs::Get(profile_)->pref_service()->GetBoolean(
+          pref_names::kLoadCryptoTokenExtension)) {
     Add(IDR_CRYPTOTOKEN_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("cryptotoken")));
   }

@@ -177,13 +177,15 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
   // NOTE: the relative value of 0* is treated as 1*.
   if (count_relative) {
     int last_relative = 0;
-    int remaining_relative = remaining_len;
+    int64_t remaining_relative = remaining_len;
 
     for (int i = 0; i < grid_len; ++i) {
       if (grid[i].IsRelative()) {
-        grid_layout[i] =
-            (max(grid[i].Value(), 1.) * remaining_relative) / total_relative;
+        grid_layout[i] = ClampTo<int>(
+            (ClampTo<int>(max(grid[i].Value(), 1.)) * remaining_relative) /
+            total_relative);
         remaining_len -= grid_layout[i];
+        DCHECK_GE(remaining_len, 0);
         last_relative = i;
       }
     }
@@ -288,23 +290,11 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
     axis.sizes_[i] = LayoutUnit(grid_layout[i]);
 }
 
-void LayoutFrameSet::NotifyFrameEdgeInfoChanged() {
-  NOT_DESTROYED();
-  if (NeedsLayout())
-    return;
-  // FIXME: We should only recompute the edge info with respect to the frame
-  // that changed and its adjacent frame(s) instead of recomputing the edge info
-  // for the entire frameset.
-  FrameSet()->CollectEdgeInfo();
-  cols_.allow_border_ = FrameSet()->AllowBorderColumns();
-  rows_.allow_border_ = FrameSet()->AllowBorderRows();
-}
-
 void LayoutFrameSet::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
 
-  if (!Parent()->IsFrameSet() && !GetDocument().Printing()) {
+  if (!Parent()->IsFrameSet()) {
     SetWidth(LayoutUnit(View()->ViewWidth()));
     SetHeight(LayoutUnit(View()->ViewHeight()));
   }
@@ -329,7 +319,6 @@ void LayoutFrameSet::UpdateLayout() {
 
   LayoutBox::UpdateLayout();
 
-  FrameSet()->CollectEdgeInfo();
   cols_.allow_border_ = FrameSet()->AllowBorderColumns();
   rows_.allow_border_ = FrameSet()->AllowBorderRows();
 
@@ -395,6 +384,18 @@ bool LayoutFrameSet::IsChildAllowed(LayoutObject* child,
                                     const ComputedStyle&) const {
   NOT_DESTROYED();
   return child->IsFrame() || child->IsFrameSet();
+}
+
+void LayoutFrameSet::AddChild(LayoutObject* new_child,
+                              LayoutObject* before_child) {
+  LayoutBox::AddChild(new_child, before_child);
+  FrameSet()->DirtyEdgeInfoAndFullPaintInvalidation();
+}
+
+void LayoutFrameSet::RemoveChild(LayoutObject* child) {
+  LayoutBox::RemoveChild(child);
+  if (!DocumentBeingDestroyed())
+    FrameSet()->DirtyEdgeInfoAndFullPaintInvalidation();
 }
 
 CursorDirective LayoutFrameSet::GetCursor(const PhysicalOffset& point,

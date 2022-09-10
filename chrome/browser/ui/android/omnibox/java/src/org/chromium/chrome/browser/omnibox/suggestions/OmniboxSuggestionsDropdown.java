@@ -23,6 +23,7 @@ import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.view.ViewCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -30,8 +31,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.flags.CachedFeatureFlags;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.omnibox.OmniboxFeatures;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
@@ -194,17 +194,23 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             }
         });
 
+        boolean shouldShowModernizeVisualUpdate =
+                OmniboxFeatures.shouldShowModernizeVisualUpdate(context);
         final Resources resources = context.getResources();
-        int paddingSide =
-                CachedFeatureFlags.isEnabled(ChromeFeatureList.OMNIBOX_MODERNIZE_VISUAL_UPDATE)
+        int paddingSide = shouldShowModernizeVisualUpdate
                 ? resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_side)
                 : 0;
         int paddingBottom =
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_bottom);
         ViewCompat.setPaddingRelative(this, paddingSide, 0, paddingSide, paddingBottom);
 
-        mStandardBgColor = ChromeColors.getDefaultThemeColor(context, false);
-        mIncognitoBgColor = ChromeColors.getDefaultThemeColor(context, true);
+        mStandardBgColor = shouldShowModernizeVisualUpdate
+                ? ChromeColors.getSurfaceColor(
+                        context, R.dimen.omnibox_suggestion_dropdown_bg_elevation)
+                : ChromeColors.getDefaultThemeColor(context, false);
+        mIncognitoBgColor = shouldShowModernizeVisualUpdate
+                ? context.getColor(R.color.omnibox_dropdown_bg_incognito)
+                : ChromeColors.getDefaultThemeColor(context, true);
     }
 
     /** Get the Android View implementing suggestion list. */
@@ -547,5 +553,15 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         setPadding(mTempPosition[0], getPaddingTop(),
                 mAnchorView.getWidth() - mAlignmentView.getWidth() - mTempPosition[0],
                 getPaddingBottom());
+    }
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public int getStandardBgColor() {
+        return mStandardBgColor;
+    }
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public int getIncognitoBgColor() {
+        return mIncognitoBgColor;
     }
 }

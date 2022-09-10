@@ -208,7 +208,6 @@ class AppMenuHandlerImpl
             appRect.right = mDecorView.getWidth();
             appRect.bottom = mDecorView.getHeight();
         }
-
         Point pt = new Point();
         display.getSize(pt);
 

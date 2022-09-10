@@ -42,6 +42,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
 #include "base/time/default_tick_clock.h"
+#include "base/types/optional_util.h"
 #include "build/chromeos_buildflags.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/web_sandbox_flags.h"
@@ -56,11 +57,13 @@
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/page/page.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_fetch_handler_type.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
+#include "third_party/blink/public/web/web_navigation_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_init.h"
@@ -95,6 +98,7 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/idleness_detector.h"
 #include "third_party/blink/renderer/core/loader/interactive_detector.h"
+#include "third_party/blink/renderer/core/loader/old_document_info_for_commit.h"
 #include "third_party/blink/renderer/core/loader/prefetched_signed_exchange_manager.h"
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 #include "third_party/blink/renderer/core/loader/progress_tracker.h"
@@ -149,7 +153,7 @@
 namespace blink {
 
 const base::Feature kCacheInlineScriptCode{"CacheInlineScriptCode",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
 namespace {
 
@@ -299,6 +303,7 @@ struct SameSizeAsDocumentLoader
   bool waiting_for_document_loader;
   bool waiting_for_code_cache;
   std::unique_ptr<ExtraData> extra_data;
+  AtomicString reduced_accept_language;
 };
 
 // Asserts size of DocumentLoader, so that whenever a new attribute is added to
@@ -396,7 +401,8 @@ DocumentLoader::DocumentLoader(
           params_->is_cross_site_cross_browsing_context_group),
       navigation_api_back_entries_(params_->navigation_api_back_entries),
       navigation_api_forward_entries_(params_->navigation_api_forward_entries),
-      extra_data_(std::move(extra_data)) {
+      extra_data_(std::move(extra_data)),
+      reduced_accept_language_(params_->reduced_accept_language) {
   DCHECK(frame_);
 
   // TODO(dgozman): we should get rid of this boolean field, and make client
@@ -564,6 +570,7 @@ DocumentLoader::CreateWebNavigationParamsToCloneDocument() {
                                                        std::move(data));
     }
   }
+  params->reduced_accept_language = reduced_accept_language_;
   return params;
 }
 
@@ -1595,7 +1602,8 @@ void DocumentLoader::StartLoadingInternal() {
   navigation_timing_info_ = ResourceTimingInfo::Create(
       fetch_initiator_type_names::kDocument, GetTiming().NavigationStart(),
       mojom::blink::RequestContextType::IFRAME,
-      network::mojom::RequestDestination::kIframe);
+      network::mojom::RequestDestination::kIframe,
+      network::mojom::RequestMode::kNavigate);
   navigation_timing_info_->SetInitialURL(url_);
   report_timing_info_to_parent_ = ShouldReportTimingInfoToParent();
 
@@ -1778,6 +1786,8 @@ void DocumentLoader::DidInstallNewDocument(Document* document) {
   // synchronously.
   document->GetFrame()->GetClientHintsPreferences().UpdateFrom(
       client_hints_preferences_);
+
+  document->GetFrame()->SetReducedAcceptLanguage(reduced_accept_language_);
 
   const AtomicString& dns_prefetch_control =
       response_.HttpHeaderField(http_names::kXDNSPrefetchControl);
@@ -2241,11 +2251,10 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
 
   // TODO(https://crbug.com/888079): Just use the storage key sent by the
   // browser once the browser will be able to compute the origin in all cases.
-  // TODO(https://crbug.com/1271402): Make sure we have the intended behavior
-  // for initial about:blank navigations, where storage_key_ might be unset.
   frame_->DomWindow()->SetStorageKey(
       BlinkStorageKey(security_origin, storage_key_.GetTopLevelSite(),
-                      base::OptionalOrNullptr(storage_key_.GetNonce())));
+                      base::OptionalToPtr(storage_key_.GetNonce()),
+                      storage_key_.GetAncestorChainBit()));
 
   // Conceptually, SecurityOrigin doesn't have to be initialized after sandbox
   // flags are applied, but there's a UseCounter in SetSecurityOrigin() that
@@ -2256,7 +2265,7 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
   OriginTrialContext::AddTokensFromHeader(
       frame_->DomWindow(), response_.HttpHeaderField(http_names::kOriginTrial));
 
-  if (auto* parent = frame_->Tree().Parent()) {
+  if (auto* parent = frame_->Tree().Parent(FrameTreeBoundary::kFenced)) {
     const SecurityContext* parent_context = parent->GetSecurityContext();
     security_context.SetInsecureRequestPolicy(
         parent_context->GetInsecureRequestPolicy());
@@ -2387,8 +2396,14 @@ void DocumentLoader::CommitNavigation() {
   // The DocumentLoader was flagged as activated if it needs to notify the frame
   // that it was activated before navigation. Update the frame state based on
   // the new value.
-  if (frame_->HadStickyUserActivationBeforeNavigation() !=
-      had_sticky_activation_) {
+  OldDocumentInfoForCommit* old_document_info_for_commit =
+      ScopedOldDocumentInfoForCommitCapturer::CurrentInfo();
+  bool had_sticky_activation_before_navigation =
+      old_document_info_for_commit
+          ? old_document_info_for_commit
+                ->had_sticky_activation_before_navigation
+          : false;
+  if (had_sticky_activation_before_navigation != had_sticky_activation_) {
     frame_->SetHadStickyUserActivationBeforeNavigation(had_sticky_activation_);
     frame_->GetLocalFrameHostRemote()
         .HadStickyUserActivationBeforeNavigationChanged(had_sticky_activation_);
@@ -2541,9 +2556,19 @@ void DocumentLoader::CreateParserPostCommit() {
   // called for the metrics tracking logic to handle it properly.
   if (service_worker_network_provider_ &&
       service_worker_network_provider_->GetControllerServiceWorkerMode() ==
-          blink::mojom::ControllerServiceWorkerMode::kControlled) {
-    GetLocalFrameClient().DidObserveLoadingBehavior(
-        kLoadingBehaviorServiceWorkerControlled);
+          mojom::blink::ControllerServiceWorkerMode::kControlled) {
+    LoadingBehaviorFlag loading_behavior =
+        kLoadingBehaviorServiceWorkerControlled;
+    if (service_worker_network_provider_->GetFetchHandlerType() !=
+        mojom::blink::ServiceWorkerFetchHandlerType::kNotSkippable) {
+      DCHECK_NE(service_worker_network_provider_->GetFetchHandlerType(),
+                mojom::blink::ServiceWorkerFetchHandlerType::kNoHandler);
+      // LoadingBehaviorFlag is a bit stream, and `|` should work.
+      loading_behavior = static_cast<LoadingBehaviorFlag>(
+          loading_behavior |
+          kLoadingBehaviorServiceWorkerFetchHandlerSkippable);
+    }
+    GetLocalFrameClient().DidObserveLoadingBehavior(loading_behavior);
   }
 
   // Links with media values need more information (like viewport information).
@@ -2887,12 +2912,23 @@ void DocumentLoader::NotifyPrerenderingDocumentActivated(
     // process already knows it.
   }
 
-  GetTiming().MarkActivationStart(params.activation_start);
+  GetTiming().SetActivationStart(params.activation_start);
 }
 
 HashMap<KURL, EarlyHintsPreloadEntry>
 DocumentLoader::GetEarlyHintsPreloadedResources() {
   return early_hints_preloaded_resources_;
+}
+
+bool DocumentLoader::IsReloadedOrFormSubmitted() const {
+  switch (navigation_type_) {
+    case WebNavigationType::kWebNavigationTypeReload:
+    case WebNavigationType::kWebNavigationTypeFormSubmitted:
+    case WebNavigationType::kWebNavigationTypeFormResubmitted:
+      return true;
+    default:
+      return false;
+  }
 }
 
 ContentSecurityPolicy* DocumentLoader::CreateCSP() {

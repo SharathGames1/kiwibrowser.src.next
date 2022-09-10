@@ -416,6 +416,23 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   LayoutObject* PreviousInPostOrderBeforeChildren(
       const LayoutObject* stay_within) const;
 
+  // The depth of the tree.
+  wtf_size_t Depth() const;
+
+  struct CommonAncestorData {
+    STACK_ALLOCATED();
+
+   public:
+    // The last object before reaching the common ancestor from |this| and
+    // |other|.
+    LayoutObject* last = nullptr;
+    LayoutObject* other_last = nullptr;
+  };
+  LayoutObject* CommonAncestor(const LayoutObject& other,
+                               CommonAncestorData* data = nullptr) const;
+
+  bool IsBeforeInPreOrder(const LayoutObject& other) const;
+
   LayoutObject* LastLeafChild() const;
 
   // The following functions are used when the layout tree hierarchy changes to
@@ -2049,6 +2066,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   }
   void SetNeedsCollectInlines(bool b) {
     NOT_DESTROYED();
+    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsCollectInlines(b);
   }
 
@@ -3296,6 +3314,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     // Same as LayoutObject::SetNeedsPaintPropertyUpdate(), but does not mark
     // ancestors as having a descendant needing a paint property update.
     void SetOnlyThisNeedsPaintPropertyUpdate() {
+      DCHECK(!layout_object_.GetDocument().InPostLifecycleSteps());
       layout_object_.bitfields_.SetNeedsPaintPropertyUpdate(true);
     }
 
@@ -4488,20 +4507,24 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   }
   void SetNeedsPositionedMovementLayout(bool b) {
     NOT_DESTROYED();
+    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsPositionedMovementLayout(b);
   }
   void SetNormalChildNeedsLayout(bool b) {
     NOT_DESTROYED();
+    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNormalChildNeedsLayout(b);
     if (b)
       bitfields_.SetIsTableColumnsConstraintsDirty(true);
   }
   void SetPosChildNeedsLayout(bool b) {
     NOT_DESTROYED();
+    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetPosChildNeedsLayout(b);
   }
   void SetNeedsSimplifiedNormalFlowLayout(bool b) {
     NOT_DESTROYED();
+    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsSimplifiedNormalFlowLayout(b);
   }
 
@@ -4670,6 +4693,7 @@ inline void LayoutObject::SetNeedsPositionedMovementLayout() {
 
 inline void LayoutObject::SetIsInLayoutNGInlineFormattingContext(
     bool new_value) {
+  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (IsInLayoutNGInlineFormattingContext() == new_value)
     return;
   InLayoutNGInlineFormattingContextWillChange(new_value);
@@ -4681,6 +4705,7 @@ inline void LayoutObject::SetIsInLayoutNGInlineFormattingContext(
 }
 
 inline void LayoutObject::SetHasBoxDecorationBackground(bool b) {
+  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (b == bitfields_.HasBoxDecorationBackground())
     return;
 

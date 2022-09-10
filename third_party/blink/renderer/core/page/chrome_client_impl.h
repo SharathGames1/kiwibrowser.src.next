@@ -91,7 +91,8 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
                      const WebDragData&,
                      DragOperationsMask,
                      const SkBitmap& drag_image,
-                     const gfx::Point& drag_image_offset) override;
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect) override;
   bool AcceptsLoadDrops() const override;
   Page* CreateWindowDelegate(LocalFrame*,
                              const FrameLoadRequest&,
@@ -103,7 +104,7 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   void Show(LocalFrame& frame,
             LocalFrame& opener_frame,
             NavigationPolicy navigation_policy,
-            const gfx::Rect& initial_rect,
+            const mojom::blink::WindowFeatures& window_features,
             bool user_gesture) override;
   void DidOverscroll(const gfx::Vector2dF& overscroll_delta,
                      const gfx::Vector2dF& accumulated_overscroll,

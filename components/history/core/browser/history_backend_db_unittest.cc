@@ -2780,6 +2780,107 @@ TEST_F(HistoryBackendDBTest, MigrateClustersAddColumns) {
   ASSERT_TRUE(db.DoesColumnExist("clusters_and_visits", "url_for_display"));
 }
 
+TEST_F(HistoryBackendDBTest, MigrateAnnotationsAddColumnsForSync) {
+  ASSERT_NO_FATAL_FAILURE(CreateDBVersion(57));
+
+  // Precondition: Open the old version of the DB and make sure the new columns
+  // don't exist yet.
+  {
+    sql::Database db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "browser_type"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "window_id"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "tab_id"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "task_id"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "root_task_id"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "parent_task_id"));
+    ASSERT_FALSE(db.DoesColumnExist("context_annotations", "response_code"));
+
+    ASSERT_FALSE(db.DoesColumnExist("content_annotations", "page_language"));
+    ASSERT_FALSE(db.DoesColumnExist("content_annotations", "password_state"));
+  }
+
+  // Re-open the db, triggering migration.
+  CreateBackendAndDatabase();
+
+  // The version should have been updated.
+  ASSERT_GE(HistoryDatabase::GetCurrentVersion(), 58);
+
+  DeleteBackend();
+
+  // Open the db manually again and make sure the new columns exist.
+  {
+    sql::Database db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+
+    // Confirm that the new columns exist now.
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "browser_type"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "window_id"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "tab_id"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "task_id"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "root_task_id"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "parent_task_id"));
+    EXPECT_TRUE(db.DoesColumnExist("context_annotations", "response_code"));
+
+    EXPECT_TRUE(db.DoesColumnExist("content_annotations", "page_language"));
+    EXPECT_TRUE(db.DoesColumnExist("content_annotations", "password_state"));
+  }
+}
+
+TEST_F(HistoryBackendDBTest, MigrateVisitsAddIsKnownToSyncColumn) {
+  ASSERT_NO_FATAL_FAILURE(CreateDBVersion(58));
+
+  // Open the old version of the DB and make sure the new columns don't exist
+  // yet. Also add some visits marked as from SYNC in the old style.
+  {
+    sql::Database db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+    ASSERT_FALSE(db.DoesColumnExist("visits", "is_known_to_sync"));
+  }
+
+  // Re-open the db, triggering migration.
+  CreateBackendAndDatabase();
+
+  // The version should have been updated.
+  ASSERT_GE(HistoryDatabase::GetCurrentVersion(), 59);
+
+  DeleteBackend();
+
+  // Open the db manually again and make sure the new columns exist.
+  {
+    sql::Database db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+    EXPECT_TRUE(db.DoesColumnExist("visits", "is_known_to_sync"));
+  }
+}
+
+// ^^^ NEW MIGRATION TESTS GO HERE ^^^
+
+// Preparation for the next DB migration: This test verifies that the test DB
+// file for the current version exists and can be loaded.
+// In the past, we only added a history.57.sql file to the repo while adding a
+// migration to the NEXT version 58. That's confusing because then the developer
+// has to reverse engineer what the migration for 57 was. This test looks like
+// a no-op, but verifies that the test file for the current version always
+// pre-exists, so adding the NEXT migration doesn't require reverse engineering.
+// If you introduce a new migration, add a test for it above, and add a new
+// history.n.sql file for the new DB layout so that this test keeps passing.
+// SQL schemas can change without migrations, so make sure to verify the
+// history.n-1.sql is up-to-date by re-creating. The flow to create a migration
+// n should be:
+// 1) There should already exist history.n-1.sql.
+// 2) Re-create history.n-1.sql to make sure it hasn't changed since it was
+//    created.
+// 3) Add a migration test beginning with `CreateDBVersion(n-1)` and ending with
+//    `ASSERT_GE(HistoryDatabase::GetCurrentVersion(), n);`
+// 4) Create history.n.sql.
+TEST_F(HistoryBackendDBTest, VerifyTestSQLFileForCurrentVersionAlreadyExists) {
+  ASSERT_NO_FATAL_FAILURE(
+      CreateDBVersion(HistoryDatabase::GetCurrentVersion()));
+  CreateBackendAndDatabase();
+}
+
 bool FilterURL(const GURL& url) {
   return url.SchemeIsHTTPOrHTTPS();
 }

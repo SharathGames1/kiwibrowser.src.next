@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/stack_container.h"
 #include "base/time/time.h"
@@ -23,6 +23,7 @@
 #include "components/history/core/browser/url_row.h"
 #include "components/query_parser/query_parser.h"
 #include "components/query_parser/snippet.h"
+#include "components/sessions/core/session_id.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -149,6 +150,11 @@ class VisitRow {
   VisitID originator_referring_visit = kInvalidVisitID;
   VisitID originator_opener_visit = kInvalidVisitID;
 
+  // Set to true for visits known to Chrome Sync, which can be:
+  //  1. Remote visits that have been synced to the local machine.
+  //  2. Local visits that have been sent to Sync.
+  bool is_known_to_sync = false;
+
   // We allow the implicit copy constructor and operator=.
 };
 
@@ -158,16 +164,6 @@ typedef std::vector<VisitRow> VisitVector;
 // The basic information associated with a visit (timestamp, type of visit),
 // used by HistoryBackend::AddVisits() to create new visits for a URL.
 typedef std::pair<base::Time, ui::PageTransition> VisitInfo;
-
-// PageVisit ------------------------------------------------------------------
-
-// Represents a simplified version of a visit for external users. Normally,
-// views are only interested in the time, and not the other information
-// associated with a VisitRow.
-struct PageVisit {
-  URLID page_id = 0;
-  base::Time visit_time;
-};
 
 // QueryResults ----------------------------------------------------------------
 
@@ -430,58 +426,6 @@ struct Opener {
   ContextID context_id;
   int nav_entry_id;
   GURL url;
-};
-
-// Navigation -----------------------------------------------------------------
-
-// Marshalling structure for AddPage.
-struct HistoryAddPageArgs {
-  // The default constructor is equivalent to:
-  //
-  //   HistoryAddPageArgs(
-  //       GURL(), base::Time(), nullptr, 0, GURL(),
-  //       RedirectList(), ui::PAGE_TRANSITION_LINK,
-  //       false, SOURCE_BROWSED, false, true,
-  //       absl::nullopt, absl::nullopt, absl::nullopt)
-  HistoryAddPageArgs();
-  HistoryAddPageArgs(const GURL& url,
-                     base::Time time,
-                     ContextID context_id,
-                     int nav_entry_id,
-                     const GURL& referrer,
-                     const RedirectList& redirects,
-                     ui::PageTransition transition,
-                     bool hidden,
-                     VisitSource source,
-                     bool did_replace_entry,
-                     bool consider_for_ntp_most_visited,
-                     absl::optional<std::u16string> title = absl::nullopt,
-                     absl::optional<Opener> opener = absl::nullopt,
-                     absl::optional<int64_t> bookmark_id = absl::nullopt);
-  HistoryAddPageArgs(const HistoryAddPageArgs& other);
-  ~HistoryAddPageArgs();
-
-  GURL url;
-  base::Time time;
-  ContextID context_id;
-  int nav_entry_id;
-  GURL referrer;
-  RedirectList redirects;
-  ui::PageTransition transition;
-  bool hidden;
-  VisitSource visit_source;
-  bool did_replace_entry;
-  // Specifies whether a page visit should contribute to the Most Visited tiles
-  // in the New Tab Page. Note that setting this to true (most common case)
-  // doesn't guarantee it's relevant for Most Visited, since other requirements
-  // exist (e.g. certain page transition types).
-  bool consider_for_ntp_most_visited;
-  // Indicates whether this URL visit can be included in FLoC computation. See
-  // VisitRow::floc_allowed for details.
-  bool floc_allowed;
-  absl::optional<std::u16string> title;
-  absl::optional<Opener> opener;
-  absl::optional<int64_t> bookmark_id;
 };
 
 // TopSites -------------------------------------------------------------------
@@ -747,6 +691,50 @@ class DomainVisit {
 // lifetime ends. This is to ensure that History actually has the visit row
 // already written.
 struct VisitContextAnnotations {
+  VisitContextAnnotations();
+  VisitContextAnnotations(const VisitContextAnnotations& other);
+  ~VisitContextAnnotations();
+
+  bool operator==(const VisitContextAnnotations& other) const;
+  bool operator!=(const VisitContextAnnotations& other) const;
+
+  // Values are persisted; do not reorder or reuse, and only add new values at
+  // the end.
+  enum class BrowserType {
+    kUnknown = 0,
+    kTabbed = 1,
+    kPopup = 2,
+    kCustomTab = 3,
+  };
+
+  // Fields known immediately on page load, when the visit is created:
+  struct OnVisitFields {
+    // The type of browser (tabbed, CCT etc) that produced this visit.
+    BrowserType browser_type = BrowserType::kUnknown;
+
+    // The IDs of the window and tab in which the visit happened.
+    SessionID window_id = SessionID::InvalidValue();
+    SessionID tab_id = SessionID::InvalidValue();
+
+    // Task IDs which can be used to group related visits together. See
+    // chrome/browser/complex_tasks.
+    int64_t task_id = -1;
+    int64_t root_task_id = -1;
+    int64_t parent_task_id = -1;
+
+    // The HTTP response code of the navigation.
+    int response_code = 0;
+
+    bool operator==(const OnVisitFields& other) const;
+    bool operator!=(const OnVisitFields& other) const;
+  };
+
+  OnVisitFields on_visit;
+
+  // The remaining fields are "on-close": They are computed and written to the
+  // DB later, when the visit is "closed" (i.e. the user navigated away or
+  // closed the tab).
+
   // True if the user has cut or copied the omnibox URL to the clipboard for
   // this page load.
   bool omnibox_url_copied = false;
@@ -833,22 +821,17 @@ struct AnnotatedVisit {
   VisitSource source;
 };
 
-// A minimal representation of `AnnotationVisit` used when retrieving them from
-// `VisitAnnotationsDatabase`.
-struct AnnotatedVisitRow {
-  AnnotatedVisitRow() = default;
-  AnnotatedVisitRow(const VisitID visit_id,
-                    const VisitContextAnnotations& context_annotations,
-                    const VisitContentAnnotations& content_annotations)
-      : visit_id(visit_id),
-        context_annotations(context_annotations),
-        content_annotations(content_annotations) {}
+// `ClusterVisit` tracks duplicate visits to propagate deletes. Only the
+// duplicate's URL and visit time are needed to delete it, hence doesn't contain
+// all the information contained in e.g. `ClusterVisit`.
+struct DuplicateClusterVisit {
+  VisitID visit_id = 0;
 
-  VisitID visit_id;
-  VisitContextAnnotations context_annotations;
-  // TODO(manukh): retrieve and persist `content_annotations`; currently, only
-  //  `context_annotations` are being retrieved and persisted.
-  VisitContentAnnotations content_annotations;
+  // Not persisted; derived from visit_id.
+  GURL url = {};
+
+  // Not persisted; derived from visit_id.
+  base::Time visit_time = {};
 };
 
 // An `AnnotatedVisit` associated with some other metadata from clustering.
@@ -873,9 +856,9 @@ struct ClusterVisit {
 
   // A list of visits that have been de-duplicated into this visit. The parent
   // visit is considered the best visit among all the duplicates, and the worse
-  // visits are now contained here.
-  // TODO(manukh): Persist to db.
-  std::vector<ClusterVisit> duplicate_visits;
+  // visits are now contained here. Used for deletions; when the parent visit is
+  // deleted, the duplicate visits are deleted as well.
+  std::vector<DuplicateClusterVisit> duplicate_visits;
 
   // The site engagement score of the URL associated with this visit. This
   // should not be used by the UI.
@@ -953,11 +936,11 @@ struct ClusterKeywordData {
   // crbug.com/1335975: Remove this method when we remove the histograms.
   std::string GetKeywordTypeLabel() const;
 
-  ClusterKeywordType type;
+  ClusterKeywordType type = ClusterKeywordData::kUnknown;
 
-  // A floating point score describing how important this
-  // keyword is to the containing cluster.
-  float score;
+  // A floating point score describing how important this keyword is to the
+  // containing cluster.
+  float score = 0;
 
   // Entity collections associated with the keyword this is attached to.
   std::vector<std::string> entity_collections;
@@ -991,7 +974,6 @@ struct Cluster {
   std::vector<ClusterVisit> visits;
 
   // A map of keywords to additional data.
-  // TODO(manukh): Persist to db.
   base::flat_map<std::u16string, ClusterKeywordData> keyword_to_data_map;
 
   // Whether the cluster should be shown prominently on UI surfaces.
@@ -1020,6 +1002,62 @@ struct Cluster {
   // and should not be persisted. It's a UI-state-specific score that's
   // convenient to buffer here.
   float search_match_score = 0.0;
+
+  // Set to true if this cluster was loaded from SQL rather than dynamically
+  // generated. Used for UI display only and should not be persisted.
+  bool from_persistence = false;
+};
+
+// Navigation -----------------------------------------------------------------
+
+// Marshalling structure for AddPage.
+struct HistoryAddPageArgs {
+  // The default constructor is equivalent to:
+  //
+  //   HistoryAddPageArgs(
+  //       GURL(), base::Time(), nullptr, 0, GURL(),
+  //       RedirectList(), ui::PAGE_TRANSITION_LINK,
+  //       false, SOURCE_BROWSED, false, true,
+  //       absl::nullopt, absl::nullopt, absl::nullopt)
+  HistoryAddPageArgs();
+  HistoryAddPageArgs(const GURL& url,
+                     base::Time time,
+                     ContextID context_id,
+                     int nav_entry_id,
+                     const GURL& referrer,
+                     const RedirectList& redirects,
+                     ui::PageTransition transition,
+                     bool hidden,
+                     VisitSource source,
+                     bool did_replace_entry,
+                     bool consider_for_ntp_most_visited,
+                     absl::optional<std::u16string> title = absl::nullopt,
+                     absl::optional<Opener> opener = absl::nullopt,
+                     absl::optional<int64_t> bookmark_id = absl::nullopt,
+                     absl::optional<VisitContextAnnotations::OnVisitFields>
+                         context_annotations = absl::nullopt);
+  HistoryAddPageArgs(const HistoryAddPageArgs& other);
+  ~HistoryAddPageArgs();
+
+  GURL url;
+  base::Time time;
+  ContextID context_id;
+  int nav_entry_id;
+  GURL referrer;
+  RedirectList redirects;
+  ui::PageTransition transition;
+  bool hidden;
+  VisitSource visit_source;
+  bool did_replace_entry;
+  // Specifies whether a page visit should contribute to the Most Visited tiles
+  // in the New Tab Page. Note that setting this to true (most common case)
+  // doesn't guarantee it's relevant for Most Visited, since other requirements
+  // exist (e.g. certain page transition types).
+  bool consider_for_ntp_most_visited;
+  absl::optional<std::u16string> title;
+  absl::optional<Opener> opener;
+  absl::optional<int64_t> bookmark_id;
+  absl::optional<VisitContextAnnotations::OnVisitFields> context_annotations;
 };
 
 }  // namespace history

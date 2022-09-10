@@ -74,7 +74,6 @@ class CounterStyle;
 class CounterStyleMap;
 class CSSFontSelector;
 class CSSPropertyValueSet;
-class CSSScrollTimeline;
 class CSSStyleSheet;
 class CSSValue;
 class Document;
@@ -95,7 +94,6 @@ class StyleResolver;
 class StyleResolverStats;
 class StyleRuleFontFace;
 class StyleRuleFontPaletteValues;
-class StyleRuleScrollTimeline;
 class StyleRuleKeyframes;
 class StyleRuleUsageTracker;
 class StyleSheet;
@@ -270,6 +268,8 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void SetStyleAffectedByLayout() { style_affected_by_layout_ = true; }
   bool StyleAffectedByLayout() { return style_affected_by_layout_; }
 
+  bool StyleMaybeAffectedByLayout(const Node&);
+
   bool SkippedContainerRecalc() const { return skipped_container_recalc_ != 0; }
   void IncrementSkippedContainerRecalc() { ++skipped_container_recalc_; }
   void DecrementSkippedContainerRecalc() { --skipped_container_recalc_; }
@@ -440,13 +440,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   void EnvironmentVariableChanged();
 
-  // Called when the set of @scroll-timeline rules changes. E.g. if a new
-  // @scroll-timeline rule was inserted.
-  //
-  // Not to be confused with ScrollTimelineInvalidated, which is called when
-  // elements *referenced* by @scroll-timeline rules change.
-  void ScrollTimelinesChanged();
-
   void MarkAllElementsForStyleRecalc(const StyleChangeReasonForTracing& reason);
   void MarkViewportStyleDirty();
   bool IsViewportStyleDirty() const { return viewport_style_dirty_; }
@@ -466,18 +459,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   StyleRuleFontPaletteValues* FontPaletteValuesForNameAndFamily(
       AtomicString palette_name,
       AtomicString font_family);
-
-  void UpdateTimelines();
-
-  CSSScrollTimeline* FindScrollTimeline(const AtomicString& name);
-
-  // Called when information a @scroll-timeline depends on changes, e.g.
-  // when we have source:selector(#foo), and the element referenced by
-  // #foo changes.
-  //
-  // Not to be confused with ScrollTimelinesChanged, which is called when
-  // @scroll-timeline rules themselves change.
-  void ScrollTimelineInvalidated(CSSScrollTimeline&);
 
   CounterStyleMap* GetUserCounterStyleMap() { return user_counter_style_map_; }
   const CounterStyle& FindCounterStyleAcrossScopes(const AtomicString&,
@@ -675,16 +656,12 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   void ClearKeyframeRules();
   void ClearPropertyRules();
-  void ClearScrollTimelineRules();
 
   class AtRuleCascadeMap;
 
   void AddPropertyRulesFromSheets(AtRuleCascadeMap&,
                                   const ActiveStyleSheetVector&,
                                   bool is_user_style);
-  void AddScrollTimelineRulesFromSheets(AtRuleCascadeMap&,
-                                        const ActiveStyleSheetVector&,
-                                        bool is_user_style);
   void AddFontPaletteValuesRulesFromSheets(
       const ActiveStyleSheetVector& sheets);
 
@@ -694,9 +671,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void AddUserKeyframeStyle(StyleRuleKeyframes*);
   void AddFontPaletteValuesRules(const RuleSet& rule_set);
   void AddPropertyRules(AtRuleCascadeMap&, const RuleSet&, bool is_user_style);
-  void AddScrollTimelineRules(AtRuleCascadeMap&,
-                              const RuleSet&,
-                              bool is_user_style);
   bool UserKeyframeStyleShouldOverride(
       const StyleRuleKeyframes* new_rule,
       const StyleRuleKeyframes* existing_rule) const;
@@ -805,7 +779,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   bool viewport_style_dirty_{false};
   bool fonts_need_update_{false};
   bool counter_styles_need_update_{false};
-  bool timelines_need_update_{false};
 
   // Set to true if we allow marking style dirty from style recalc. Ideally, we
   // should get rid of this, but we keep track of where we allow it with
@@ -873,10 +846,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   FontPaletteValuesRuleMap font_palette_values_rule_map_;
 
   Member<CounterStyleMap> user_counter_style_map_;
-
-  HeapHashMap<AtomicString, Member<StyleRuleScrollTimeline>>
-      scroll_timeline_rule_map_;
-  HeapHashMap<AtomicString, Member<CSSScrollTimeline>> scroll_timeline_map_;
 
   Member<CascadeLayerMap> user_cascade_layer_map_;
 

@@ -11,10 +11,6 @@
 #include "components/download/public/common/download_item.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/ash/policy/dlp/dlp_files_controller.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-
 namespace base {
 class FilePath;
 }
@@ -53,11 +49,10 @@ class DownloadFilePicker : public ui::SelectFileDialog::Listener,
   // policy.
   void OnFileSelected(const base::FilePath& virtual_path);
 
-  // Called when restricted files sources are obtained.
+  // Called when `is_allowed` is obtained.
   // Runs |file_selected_callback_| with |path| and then deletes this
   // object.
-  void CompleteFileSelection(const base::FilePath& path,
-                             const std::vector<GURL>& restricted_sources);
+  void CompleteFileSelection(const base::FilePath& path, bool is_allowed);
 
   // SelectFileDialog::Listener implementation.
   void FileSelected(const base::FilePath& path,
@@ -79,13 +74,6 @@ class DownloadFilePicker : public ui::SelectFileDialog::Listener,
 
   // The item to be downloaded.
   raw_ptr<download::DownloadItem> download_item_;
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // DlpFilesController is responsible for checking whether any of the selected
-  // files is restricted according to the DataLeakPrevention policy.
-  absl::optional<policy::DlpFilesController> dlp_files_controller_;
-
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_PICKER_H_

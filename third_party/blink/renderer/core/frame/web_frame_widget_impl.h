@@ -349,12 +349,14 @@ class CORE_EXPORT WebFrameWidgetImpl
   void ResetZoomLevelForTesting() override;
   void SetDeviceScaleFactorForTesting(float factor) override;
   FrameWidgetTestHelper* GetFrameWidgetTestHelperForTesting() override;
+  void PrepareForFinalLifecyclUpdateForTesting() override;
 
   // Called when a drag-n-drop operation should begin.
   virtual void StartDragging(const WebDragData&,
                              DragOperationsMask,
                              const SkBitmap& drag_image,
-                             const gfx::Point& drag_image_offset);
+                             const gfx::Vector2d& cursor_offset,
+                             const gfx::Rect& drag_obj_rect);
 
   bool DoingDragAndDrop() { return doing_drag_and_drop_; }
   static void SetIgnoreInputEvents(bool value) { ignore_input_events_ = value; }

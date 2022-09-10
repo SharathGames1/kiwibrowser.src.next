@@ -16,6 +16,22 @@ namespace features {
 const base::Feature kAllowWindowDragUsingSystemDragDrop{
     "AllowWindowDragUsingSystemDragDrop", base::FEATURE_DISABLED_BY_DEFAULT};
 
+#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
+const base::Feature kDesktopPWAsAppHomePage{"DesktopPWAsAppHomePage",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
+
+// Enables showing the email of the flex org admin that setup CBCM in the
+// management disclosures.
+
+#if BUILDFLAG(IS_CHROMEOS)
+extern const base::Feature kFlexOrgManagementDisclosure{
+    "FlexOrgManagementDisclosure", base::FEATURE_DISABLED_BY_DEFAULT};
+#else
+extern const base::Feature kFlexOrgManagementDisclosure{
+    "FlexOrgManagementDisclosure", base::FEATURE_ENABLED_BY_DEFAULT};
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
 // Enables Chrome Labs menu in the toolbar. See https://crbug.com/1145666
 const base::Feature kChromeLabs{"ChromeLabs",
                                 base::FEATURE_DISABLED_BY_DEFAULT};
@@ -128,6 +144,17 @@ const base::FeatureParam<int> kSideSearchPageActionLabelAnimationMaxCount{
 const base::Feature kClobberAllSideSearchSidePanels{
     "ClobberAllSideSearchSidePanels", base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Feature that controls whether or not feature engagement configurations can be
+// used to control automatic triggering for side search.
+const base::Feature kSideSearchAutoTriggering{"SideSearchAutoTriggering",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Feature param that determines how many times a user has to return to a given
+// SRP before we automatically trigger the side search side panel for that SRP
+// on a subsequent navigation.
+const base::FeatureParam<int> kSideSearchAutoTriggeringReturnCount{
+    &kSideSearchAutoTriggering, "SideSearchAutoTriggeringReturnCount", 2};
+
 // Adds improved support for handling multiple contextual and global RHS browser
 // side panels. Designed specifically to handle the interim state before the v2
 // side panel project launches.
@@ -145,6 +172,11 @@ const base::FeatureParam<bool> kSidePanelJourneysOpensFromOmnibox{
 const base::Feature kScrollableTabStrip{"ScrollableTabStrip",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
 const char kMinimumTabWidthFeatureParameterName[] = "minTabWidth";
+
+// Splits pinned and unpinned tabs into separate TabStrips.
+// https://crbug.com/1346019
+const base::Feature kSplitTabStrip("SplitTabStrip",
+                                   base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Directly controls the "new" badge (as opposed to old "master switch"; see
 // https://crbug.com/1169907 for master switch deprecation and
@@ -199,9 +231,6 @@ const char kTabSearchSearchThresholdName[] = "TabSearchSearchThreshold";
 
 const base::FeatureParam<bool> kTabSearchSearchIgnoreLocation{
     &kTabSearchFuzzySearch, "TabSearchSearchIgnoreLocation", false};
-
-const base::Feature kTabSearchMediaTabs{"TabSearchMediaTabs",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
 
 // If this feature parameter is enabled, show media tabs in both "Audio & Video"
 // section and "Open Tabs" section.
